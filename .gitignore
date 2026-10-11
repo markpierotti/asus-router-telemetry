@@ -1,0 +1,12 @@
+/out/
+*.o
+*.dSYM/
+.DS_Store
+__pycache__/
+.env
+.env.*
+*known_hosts*
+*.pem
+*.key
+/firmware/
+/evidence/raw/
