@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy to <data-dir>/config.json; replace all example values. Documentation address only. Never store passwords here.",
+  "host": "192.0.2.1",
+  "user": "routeradmin",
+  "artifact": "/absolute/path/to/out/router_health_arm",
+  "known_hosts": "/absolute/path/to/reviewed/known_hosts",
+  "artifact_sha": "REPLACE_WITH_YOUR_ARM_ARTIFACT_SHA256",
+  "known_hosts_sha": "REPLACE_WITH_YOUR_PINNED_KNOWN_HOSTS_FILE_SHA256",
+  "interval": 60,
+  "retain_samples": 1440,
+  "retain_outcomes": 5000,
+  "open_after": 3,
+  "resolve_after": 2,
+  "ssh": "ssh",
+  "connect_timeout": 8,
+  "run_bound": 15,
+  "watchdog_selftest": true,
+  "watchdog_selftest_bound": 3,
+  "interactive_auth": null
+}

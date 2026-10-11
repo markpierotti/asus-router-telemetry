@@ -32,7 +32,7 @@ python3 - <<'CHECK'
 import json
 with open('out/arm-sample.json') as stream:
     result = json.load(stream)
-if result.get('schema') != 'router_health/1' or result.get('host', {}).get('machine') != 'armv7l':
+if result.get('schema') != 'router_health/2' or result.get('host', {}).get('machine') != 'armv7l':
     raise SystemExit('FAIL: unexpected ARM schema or architecture')
 print('ARM JSON: OK')
 CHECK

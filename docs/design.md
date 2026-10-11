@@ -1,34 +1,29 @@
 # Design and engineering tradeoffs
 
-## Collection flow
-
 ```mermaid
 flowchart LR
-    P[Linux /proc] --> R[C reporter]
-    F[Filesystem statvfs] --> R
-    R --> J[One JSON document]
-    J -. future integration .-> M[External monitoring host]
+    P[Linux /proc and statvfs] --> R[Single-shot C reporter]
+    R --> S[Bounded SSH transport]
+    S --> V[Schema validation]
+    V --> D[Successive CPU deltas]
+    D --> H[Local history and status]
+    V --> I[Collection incidents]
 ```
 
-The reporter has no networking component. External invocation and transport belong to a separate integration layer.
+## Lightweight router component
 
-## Why C and static ARM
+The C reporter opens no listener and exits after one JSON document. A static ARMv7 build avoids needing the router's exact dynamic loader, while still depending on its kernel and instruction support. This is userspace software, not replacement firmware. Filesystem capacity uses statvfs; `/proc` parsing supports fixture input.
 
-C provides direct access to system interfaces with a small single executable. The ARM build uses `arm-linux-gnueabi-gcc`, ARMv7-A instructions and static linkage. This avoids requiring the router's installed dynamic loader or matching glibc symbol versions. Static linkage still depends on the running kernel, supported instructions and execution environment; it is not a universal compatibility guarantee.
+Mount paths decode octal escapes such as `\040` before capacity lookup. Schema 2 excludes virtual placeholder mounts and duplicate records; unavailable memory and inode values remain null. Candidate storage uses path/device heuristics and does not establish physical USB identity.
 
-## Mount-path failure
+## External collection
 
-`/proc/mounts` escapes spaces as `\040`. Passing an encoded mount path directly to `statvfs` returns an error for a real path such as `/tmp/mnt/My Disk`. The implementation decodes octal escapes before looking up capacity. Embedded tests cover the decoder; a real tmpfs mount with a space was also used in the recorded offline validation.
+The collector makes no model calls. It verifies local inputs, uses strict SSH host-key checking and a shared session, creates an exclusive owned `/tmp` directory, self-tests its remote watchdog, verifies transferred bytes, and runs the reporter with a bound. Directory cleanup failures are surfaced separately. Interactive SSH needs both a controlling terminal and foreground process-group ownership; restoring terminal modes and cleaning descendants were explicit regression cases.
 
-## Bounded collection
+Raw CPU counters require two readings. Idle includes iowait; guest time is not added twice. First readings, resets and detected reboots have explicit states. Falling uptime detects some reboots but is not a boot identity. Persisted monotonic values should not be compared across a collector-host reboot or across hosts. Samples from different devices or mock/live sources must use separate data directories.
 
-Reads and generated CPU-counter storage have explicit limits. Embedded tests cover escaping and CPU output truncation. These checks are not an exhaustive audit, and missing/truncated inputs must not be treated as a clean bill of health.
+## Operational boundaries
 
-## Deliberate limits
+Three consecutive collection failures open a local incident; two successes resolve it. SSH failure does not establish a router outage. Retention limits record counts. The loop is foreground only, with no scheduled service, notifications or automatic remediation. Password authentication is the current transport setting; unattended key use needs a separate change.
 
-- Raw counters do not directly provide CPU utilization percentages.
-- Mount heuristics can include candidate storage that is not a real attached USB disk.
-- A single successful run will not demonstrate long-term reliability or startup persistence.
-- macOS smoke tests establish parser/JSON behavior, not Linux `/proc` collection.
-- The captured live device inventory does not establish the userspace floating-point ABI.
-- Heavy security analysis belongs on a more capable external host; this project focuses on lightweight collection.
+Two successful hardware samples establish the measured path, not long-term reliability, safe failure handling under every real network condition, AP/NAS operation or a security-hardened network. Heavy analysis remains a separate external-host concern.

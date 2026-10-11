@@ -2,10 +2,10 @@
 
 Project lead: Mark Pierotti.
 
-The reporter source is imported unchanged from the working `rt-ax56u-health` project at the source digest recorded in [validation](validation.md). This standalone repository intentionally does not modify that live bench project.
+Reporter v1.0.2 is imported unchanged from the private bench project; its digest is recorded in [validation](validation.md). Collector v1.2.0 is a portable adaptation: private paths, username, address and host-key digest are removed; operator configuration is explicit; artifact verification remains required for normal live use. The original bench code and private data are untouched.
 
-Hermes with AI coding models assisted with investigation, code generation, test development and documentation. Codex assisted with review and preparation of this repository. AI output required correction, particularly around compatibility claims, shell exit status, timeout handling and cleanup ownership.
+[Import manifest](import-manifest.json) records the original and adapted code-file hashes. Test fixtures derive from reporter output and contain no device hostname, address, login, host key or credential. Synthetic credentials and documentation addresses in tests are examples, not live access material.
 
-Ghidra, REA, GNU binutils, QEMU, GCC, Docker and OpenSSL were investigation/build/test tools. Their implementations are not included. Vendor firmware, extracted binaries, device credentials, host keys, serial numbers and full raw inventory are excluded.
+Hermes with AI coding models assisted with investigation, implementation, tests and documentation. Codex assisted with independent review, behavioural counterexamples, numeric checks and repository preparation. AI-generated implementation required correction around compatibility claims, stdin forwarding, BusyBox dispatch, shell exit status, watchdog descriptors, cleanup ownership, terminal foreground handling and descendant termination.
 
-The firmware and bench findings in these notes summarize recorded project work. The repository's build recipe is a portable derivative, not a promise to reproduce an earlier binary byte for byte. Hardware execution has not been claimed without saved results.
+Ghidra, REA, GNU binutils, QEMU, GCC, Docker, OpenSSH and OpenSSL were tools. Their implementations, vendor firmware, proprietary extracted binaries and private bench evidence are not included. No claim of unaided authorship, bit-for-bit rebuild reproducibility or custom-firmware bootability is made.

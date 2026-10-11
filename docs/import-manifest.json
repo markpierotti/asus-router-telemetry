@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-12",
+  "reporter_source_sha256": "8e4ce0e2034886f6e8f1f97cfde76323f5b0276e7b377194134d1df726e4f016",
+  "bench_collector_version": "1.2.0",
+  "adaptations": [
+    "explicit operator configuration",
+    "portable artifact/data paths",
+    "documentation-only test addresses and generic username",
+    "require configured artifact digest",
+    "expand operator home paths"
+  ],
+  "files": {
+    "collector.py": {
+      "bench_sha256": "052f91251dee3799b95e0046bfda5fab2ddcd7ce4e5b1ec7a633123139652a97",
+      "portable_sha256": "052f91251dee3799b95e0046bfda5fab2ddcd7ce4e5b1ec7a633123139652a97"
+    },
+    "run_tests.sh": {
+      "bench_sha256": "b1df88a18e992da98b4e3cc4b1e9c107bf8f5c3346abcaf9c5ffea8835383703",
+      "portable_sha256": "b1df88a18e992da98b4e3cc4b1e9c107bf8f5c3346abcaf9c5ffea8835383703"
+    },
+    "rtax_telemetry/__init__.py": {
+      "bench_sha256": "9af2e4cfbf0503d34c737398941e6652d4e52e9a06e3ecf2c72e632c97a330a7",
+      "portable_sha256": "9af2e4cfbf0503d34c737398941e6652d4e52e9a06e3ecf2c72e632c97a330a7"
+    },
+    "rtax_telemetry/cli.py": {
+      "bench_sha256": "d886cd56c83605bd02c004d0700fba27415813f52ff02fb12720ed9330a95516",
+      "portable_sha256": "fc1cc64e30928432ccd91cd1743cca416a07a9dbb6d73212c94c27b437dd6c62"
+    },
+    "rtax_telemetry/core.py": {
+      "bench_sha256": "f0dace8898bd2610474870ce076ecba52cda847c88165fa4564494b94c352e87",
+      "portable_sha256": "f0dace8898bd2610474870ce076ecba52cda847c88165fa4564494b94c352e87"
+    },
+    "rtax_telemetry/cpu.py": {
+      "bench_sha256": "064750db41c36992d1b84da6bca42be41e0a81b6371c6684bb6cc4b6a8635dc9",
+      "portable_sha256": "064750db41c36992d1b84da6bca42be41e0a81b6371c6684bb6cc4b6a8635dc9"
+    },
+    "rtax_telemetry/errors.py": {
+      "bench_sha256": "29635c1a0e342af7735cec899a43035d016b3bfd3c1f7802059ef30154cd2833",
+      "portable_sha256": "29635c1a0e342af7735cec899a43035d016b3bfd3c1f7802059ef30154cd2833"
+    },
+    "rtax_telemetry/mock.py": {
+      "bench_sha256": "27185e227a2c740f82a9c77c8892a5b4f5a97338b33eb86e63b9f1c5e4fe9072",
+      "portable_sha256": "27185e227a2c740f82a9c77c8892a5b4f5a97338b33eb86e63b9f1c5e4fe9072"
+    },
+    "rtax_telemetry/schema.py": {
+      "bench_sha256": "313aa59861aa8c2d50aecb28d8dac405c1cb671c51bf521b018e005b2f06ee49",
+      "portable_sha256": "313aa59861aa8c2d50aecb28d8dac405c1cb671c51bf521b018e005b2f06ee49"
+    },
+    "rtax_telemetry/status.py": {
+      "bench_sha256": "165b8453bc07ab495f304e8ddd643d89a96107295ed4bbf752e490c5b5bb22d3",
+      "portable_sha256": "165b8453bc07ab495f304e8ddd643d89a96107295ed4bbf752e490c5b5bb22d3"
+    },
+    "rtax_telemetry/store.py": {
+      "bench_sha256": "4a655279f60fd41292e105415e45a23b5c6ea73c90893d0c44d7a73c883fa52d",
+      "portable_sha256": "4a655279f60fd41292e105415e45a23b5c6ea73c90893d0c44d7a73c883fa52d"
+    },
+    "rtax_telemetry/transport.py": {
+      "bench_sha256": "78b77b2888e237153fa4e4a6105e1b1f5ee73fbbc233aaec824955e4f2cc522f",
+      "portable_sha256": "22e4679a212f5fe07a4373835a7dfe4a912ed3e6d93dfcf38fa68298515c4060"
+    },
+    "tests/__init__.py": {
+      "bench_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "tests/test_offline.py": {
+      "bench_sha256": "7a66d31ec4f75b6efbad26b84895c8b0fb070c8794e8c9656533ba737ea3fa30",
+      "portable_sha256": "5f95fa3087f1123af314b026682cf3b5bad80e8012c0ad11efacf73fea82ed59"
+    },
+    "tests/test_transport_hardening.py": {
+      "bench_sha256": "aae477bde0a64e634d7cfc55266f4e8ea572277ffdeb6d8ac5b33f8961ef892b",
+      "portable_sha256": "aae477bde0a64e634d7cfc55266f4e8ea572277ffdeb6d8ac5b33f8961ef892b"
+    },
+    "tests/test_pty_and_reap.py": {
+      "bench_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6",
+      "portable_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6"
+    },
+    "tests/pty_auth_probe.py": {
+      "bench_sha256": "c12954c81440f4557bdef7a91727082d2705d1bdeb3b05129a0c2c98fa95813c",
+      "portable_sha256": "7f3211786c379cda50e12a3ca11ce9047decf2451065f792d1561392f54fddc3"
+    },
+    "tests/fake_ssh.sh": {
+      "bench_sha256": "6518f183e2389a1c6b76d0997aa5eedb951f2ac86f044a782a1b4fa817c34940",
+      "portable_sha256": "0d837b20ad7d3b419b0b5a4ea066986fe3926c6f039eff545d249a1ecb75b262"
+    },
+    "tests/harness.py": {
+      "bench_sha256": "86ccd02cab46dd27066e42d67a62c077655072b3e1e91556a09192b4a4ee4687",
+      "portable_sha256": "0a189b22f391c85051322de526fb7905cc9da06d2ba82503f15cd277d512e66d"
+    },
+    "tests/smoke_loop.sh": {
+      "bench_sha256": "cc1f085aef43554699d4671973602595c7ef670f4206dbab7a70351890c1e863",
+      "portable_sha256": "cc1f085aef43554699d4671973602595c7ef670f4206dbab7a70351890c1e863"
+    },
+    "tests/demo_offline.sh": {
+      "bench_sha256": "8eb1a936b16cd9192e8627409d361f62b5afef5f0b2d018a143115739fea954b",
+      "portable_sha256": "8eb1a936b16cd9192e8627409d361f62b5afef5f0b2d018a143115739fea954b"
+    },
+    "tests/fixtures/live_sample.json": {
+      "bench_sha256": "e2ee3955ee8181dfd9f1a7e30ac1ab653555ecd6a4e173f3edd99fe995ba93c0",
+      "portable_sha256": "e2ee3955ee8181dfd9f1a7e30ac1ab653555ecd6a4e173f3edd99fe995ba93c0"
+    },
+    "tests/fixtures/snap_sample.json": {
+      "bench_sha256": "0f490351ddff358d76df8ac8ec93916c8527eba67fdeb6e49fada1a26d8bf5f0",
+      "portable_sha256": "0f490351ddff358d76df8ac8ec93916c8527eba67fdeb6e49fada1a26d8bf5f0"
+    }
+  }
+}

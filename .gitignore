@@ -10,3 +10,8 @@ __pycache__/
 *.key
 /firmware/
 /evidence/raw/
+
+# Private collector state and operator configuration
+/collector/data/
+/collector/config.json
+*.pyc

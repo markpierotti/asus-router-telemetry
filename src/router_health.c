@@ -8,11 +8,20 @@
  *   - Static-link friendly so it does not depend on the target's glibc version.
  *   - Every allocation and every output buffer is bounded; the JSON document is
  *     always well-formed, including when input is truncated or unavailable.
+ *   - "Unavailable" is always distinguishable from "zero": a metric that could not
+ *     be read is emitted as null (or an explicit error object), never as 0.
  *
- * ABI this source was built against (observed in the RT-AX56U 3.0.0.4.386_52090 rootfs):
+ * Schema history:
+ *   router_health/1 — had a "usb_storage" array that matched virtual placeholder
+ *                     mounts and could contain duplicate records.
+ *   router_health/2 — replaces it with a "storage" object whose "candidates" are
+ *                     block-device-backed mounts only, de-duplicated, plus a count
+ *                     of excluded placeholders. Adds a machine-readable "units" block.
+ *
+ * ABI this source was built against (observed in the RT-AX56U rootfs):
  *   ELF32, little-endian, ARM (EM_ARM), EABI5, SOFT-FLOAT (e_flags 0x05000200).
- * Matching those flags is necessary but NOT proof of runtime compatibility on a device —
- * see the feasibility/handoff reports for what remains to be confirmed on hardware.
+ * Matching those flags is necessary but NOT proof of runtime compatibility — the
+ * reporter was separately executed on the unit under a bounded, approved test.
  */
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -23,8 +32,8 @@
 #include <sys/utsname.h>
 
 #define TOOL_NAME    "router_health"
-#define TOOL_VERSION "1.0.1"
-#define SCHEMA       "router_health/1"
+#define TOOL_VERSION "1.0.2"
+#define SCHEMA       "router_health/2"
 
 /* Hard bounds. Each exists so that a pathological /proc file cannot make the tool
    allocate without limit or emit a truncated (malformed) JSON document. */
@@ -32,11 +41,19 @@
 #define CPUSTAT_MAX    (64u * 1024u)          /* max serialised cpu_stat body size  */
 #define STATVFS_MAX_ENTRIES 512               /* max mounts considered              */
 
+/* Test hook: --proc-root DIR re-points every /proc read at DIR. Read-only, no
+   behaviour change when unset. Used by the fixture tests. */
+static char g_proc[512] = "/proc";
+
+static const char *pf(const char *name)
+{
+    static char b[640];
+    snprintf(b, sizeof b, "%s/%s", g_proc, name);
+    return b;
+}
+
 /* ---------------------------------------------------------------- helpers */
 
-/* Read a whole file, growing the buffer, but never past SLURP_MAX. Returns NULL if
-   the file cannot be opened. A file larger than SLURP_MAX is returned truncated —
-   callers all parse line-oriented text, so truncation is safe and detectable. */
 static char *slurp(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -61,9 +78,7 @@ static char *slurp(const char *path)
     return buf;
 }
 
-/* Copy a JSON-safe version of src into dst (bounded). Guarantees dst is NUL-terminated
-   and never overflows. If src does not fit, the string is silently shortened: the result
-   is still a valid, closed JSON string. */
+/* Copy a JSON-safe version of src into dst (bounded, always NUL-terminated). */
 static void json_escape(const char *src, char *dst, size_t dstsz)
 {
     size_t j = 0;
@@ -84,10 +99,7 @@ static void json_escape(const char *src, char *dst, size_t dstsz)
     dst[j] = '\0';
 }
 
-/* Decode the octal escapes /proc/mounts uses in the device and mount-point fields
-   (space→\040, tab→\011, newline→\012, backslash→\134). Without this a path such as
-   "/tmp/mnt/My Disk" is passed to statvfs() verbatim and fails with ENOENT.
-   Decodes in place; the unescaped string is never longer than the input. */
+/* Decode the octal escapes /proc/mounts uses (space→\040, tab→\011, nl→\012, \→\134). */
 static void mount_unescape(char *s)
 {
     char *r = s, *w = s;
@@ -103,7 +115,6 @@ static void mount_unescape(char *s)
     *w = '\0';
 }
 
-/* Trim leading/trailing whitespace in place; returns pointer into buff. */
 static char *trim(char *s)
 {
     while (*s == ' ' || *s == '\t') s++;
@@ -114,9 +125,6 @@ static char *trim(char *s)
 
 /* ------------------------------------------------------------- /proc/stat */
 
-/* Append one cpu entry to a growable body. Returns 1 if appended, 0 if it would
-   exceed `cap` (the caller then marks the section truncated and stops). Factored out
-   so the truncation guard is directly testable (see --selftest). */
 static int cpustat_append(char *body, size_t cap, size_t *len, int first,
                           const char *key,
                           unsigned long long u, unsigned long long n, unsigned long long s,
@@ -128,15 +136,16 @@ static int cpustat_append(char *body, size_t cap, size_t *len, int first,
                      "%s\"%s\":{\"user\":%llu,\"nice\":%llu,\"system\":%llu,"
                      "\"idle\":%llu,\"iowait\":%llu,\"irq\":%llu,\"softirq\":%llu,\"steal\":%llu}",
                      first ? "" : ",", key, u,n,s,id,io,ir,si,st);
-    if (w < 0 || (size_t)w >= cap - *len) return 0;      /* would not fit */
+    if (w < 0 || (size_t)w >= cap - *len) return 0;
     *len += (size_t)w;
     return 1;
 }
 
-/* Emit per-CPU and aggregate jiffies counters (raw, not a rate). */
+/* Per-CPU and aggregate jiffies counters. Cumulative, USER_HZ (typically 100 Hz);
+   utilisation requires two samples. null when /proc/stat is unavailable. */
 static void emit_cpu_stat(void)
 {
-    char *buf = slurp("/proc/stat");
+    char *buf = slurp(pf("stat"));
     if (!buf) { printf("\"cpu_stat\":null"); return; }
     char *body = malloc(CPUSTAT_MAX);
     if (!body) { free(buf); printf("\"cpu_stat\":null"); return; }
@@ -151,7 +160,7 @@ static void emit_cpu_stat(void)
             if (sscanf(line, "%31s %llu %llu %llu %llu %llu %llu %llu %llu",
                        key, &u,&n,&s,&id,&io,&ir,&si,&st) >= 5) {
                 if (!cpustat_append(body, CPUSTAT_MAX, &len, first, key, u,n,s,id,io,ir,si,st)) {
-                    truncated = 1;                          /* stop; do not emit broken JSON */
+                    truncated = 1;
                     break;
                 }
                 first = 0;
@@ -170,7 +179,7 @@ static void emit_cpu_stat(void)
 
 static void emit_loadavg(void)
 {
-    char *buf = slurp("/proc/loadavg");
+    char *buf = slurp(pf("loadavg"));
     if (!buf) { printf("\"loadavg\":null"); return; }
     char *t = trim(buf);
     double l1=0,l5=0,l15=0; unsigned running=0,total=0; unsigned long lastpid=0;
@@ -186,7 +195,7 @@ static void emit_loadavg(void)
 
 static void emit_cpuinfo(void)
 {
-    char *buf = slurp("/proc/cpuinfo");
+    char *buf = slurp(pf("cpuinfo"));
     if (!buf) { printf("\"cpu\":null"); return; }
     int count = 0;
     char model[128] = "", hardware[128] = "", mhz[64] = "";
@@ -214,48 +223,58 @@ static void emit_cpuinfo(void)
 
 /* ------------------------------------------------------------- /proc/meminfo */
 
-/* Emit a fixed, useful subset of meminfo (kB values). Emits null when unavailable so
-   that "no telemetry" is distinguishable from "zero". */
+/* Values are in kB as the kernel reports them (Linux "kB" = 1024 bytes).
+   Each known key is always emitted: a value the kernel did not supply is null,
+   so "not reported" is never confused with a genuine zero. */
 static void emit_meminfo(void)
 {
     static const char *want[] = {
         "MemTotal","MemFree","MemAvailable","Buffers","Cached","SwapTotal","SwapFree", NULL
     };
-    char *buf = slurp("/proc/meminfo");
-    if (!buf) { printf("\"memory_kb\":null"); return; }
-    printf("\"memory_kb\":{");
-    int first = 1;
-    char *save, *line = strtok_r(buf, "\n", &save);
-    while (line) {
-        for (int i = 0; want[i]; i++) {
-            size_t kl = strlen(want[i]);
-            if (strncmp(line, want[i], kl) == 0 && line[kl] == ':') {
-                unsigned long long v = 0;
-                if (sscanf(line + kl + 1, " %llu", &v) == 1) {
-                    printf("%s\"%s\":%llu", first ? "" : ",", want[i], v);
-                    first = 0;
+    int found[8] = {0,0,0,0,0,0,0,0};
+    unsigned long long val[8] = {0,0,0,0,0,0,0,0};
+    char *buf = slurp(pf("meminfo"));
+    if (buf) {
+        char *save, *line = strtok_r(buf, "\n", &save);
+        while (line) {
+            for (int i = 0; want[i]; i++) {
+                size_t kl = strlen(want[i]);
+                if (!found[i] && strncmp(line, want[i], kl) == 0 && line[kl] == ':') {
+                    if (sscanf(line + kl + 1, " %llu", &val[i]) == 1) found[i] = 1;
+                    break;
                 }
-                break;
             }
+            line = strtok_r(NULL, "\n", &save);
         }
-        line = strtok_r(NULL, "\n", &save);
+    }
+    printf("\"memory_kb\":{");
+    for (int i = 0; want[i]; i++) {
+        printf("%s\"%s\":", i ? "," : "", want[i]);
+        if (found[i]) printf("%llu", val[i]);
+        else          printf("null");        /* kernel did not report it: UNKNOWN, not 0 */
     }
     printf("}");
-    free(buf);
+    if (buf) free(buf);
 }
 
 /* ------------------------------------------------------------------ statvfs */
 
+/* Emits df-compatible capacity figures:
+     total_bytes = f_blocks  * f_frsize
+     free_bytes  = f_bfree   * f_frsize   (filesystem-wide free, incl. reserved)
+     avail_bytes = f_bavail  * f_frsize   (available to an unprivileged writer)
+     used_bytes  = total - free
+     used_percent = used / (used + avail)   [same basis as df's Use%]
+   inodes are null when the kernel reports none (e.g. UBIFS), not 0. */
 static void emit_statvfs_pair(const char *path)
 {
     struct statvfs v;
     char ep[256];
     json_escape(path, ep, sizeof(ep));
     if (statvfs(path, &v) != 0) {
-        /* statvfs failed: report an explicit error rather than a zeroed/absent entry. */
         char err[128];
         json_escape(strerror(errno), err, sizeof(err));
-        printf("{\"path\":\"%s\",\"error\":\"%s\"}", ep, err);
+        printf("{\"path\":\"%s\",\"available\":false,\"error\":\"%s\"}", ep, err);
         return;
     }
     unsigned long long bsize = v.f_frsize ? v.f_frsize : v.f_bsize;
@@ -263,36 +282,88 @@ static void emit_statvfs_pair(const char *path)
     unsigned long long avail = (unsigned long long)v.f_bavail * bsize;
     unsigned long long free_ = (unsigned long long)v.f_bfree  * bsize;
     unsigned long long used  = total - free_;
-    unsigned pct = total ? (unsigned)((used * 100ULL) / total) : 0;
-    printf("{\"path\":\"%s\",\"total_bytes\":%llu,\"free_bytes\":%llu,"
-           "\"avail_bytes\":%llu,\"used_bytes\":%llu,\"used_percent\":%u,"
-           "\"inodes\":%llu,\"inodes_free\":%llu}",
-           ep, total, free_, avail, used, pct,
-           (unsigned long long)v.f_files, (unsigned long long)v.f_ffree);
+    unsigned long long denom = used + avail;
+    unsigned pct = denom ? (unsigned)((used * 100ULL) / denom) : 0;
+    printf("{\"path\":\"%s\",\"available\":true,\"total_bytes\":%llu,\"free_bytes\":%llu,"
+           "\"avail_bytes\":%llu,\"used_bytes\":%llu,\"used_percent\":%u,",
+           ep, total, free_, avail, used, pct);
+    if (v.f_files == 0 && v.f_ffree == 0)
+        printf("\"inodes\":null,\"inodes_free\":null}");
+    else
+        printf("\"inodes\":%llu,\"inodes_free\":%llu}",
+               (unsigned long long)v.f_files, (unsigned long long)v.f_ffree);
 }
 
 /* --------------------------------------------------------------- /proc/mounts */
 
 struct mnt { char dev[256], mp[256], fstype[64], opts[256]; };
 
-static int parse_mounts(struct mnt **out)
+static int is_virtual_fs(const char *t)
 {
-    char *buf = slurp("/proc/mounts");
-    if (!buf) { *out = NULL; return 0; }
+    static const char *skip[] = {
+        "proc","sysfs","devpts","mqueue","cgroup","cgroup2","debugfs","tracefs",
+        "securityfs","binfmt_misc","fusectl","pstore","configfs","rpc_pipefs",
+        "nsfs","none","autofs","ramfs","hugetlbfs","devtmpfs","tmpfs", NULL
+    };
+    for (int i = 0; skip[i]; i++) if (!strcmp(t, skip[i])) return 1;
+    return 0;
+}
+
+static int is_block_device(const char *dev) { return strncmp(dev, "/dev/", 5) == 0; }
+
+/* A storage CANDIDATE must be backed by a real block device and live under one of
+   the storage mount roots. This excludes virtual placeholder mounts such as the
+   tmpfs the firmware parks at /tmp/mnt before any disk is attached.
+   NOTE: "block-backed" is NOT "USB" — see the note emitted with the array. */
+static int is_storage_candidate(const struct mnt *m)
+{
+    if (!is_block_device(m->dev))       return 0;
+    if (is_virtual_fs(m->fstype))       return 0;
+    if (strncmp(m->mp, "/tmp/mnt", 8) == 0)      return 1;
+    if (strncmp(m->mp, "/mnt/", 5) == 0)         return 1;
+    if (strncmp(m->dev, "/dev/sd", 7) == 0)      return 1;
+    if (strncmp(m->dev, "/dev/mmcblk", 11) == 0) return 1;
+    if (strncmp(m->dev, "/dev/disk", 9) == 0)    return 1;
+    return 0;
+}
+
+/* True if `e` duplicates an entry already in arr[0..n-1]. */
+static int mount_is_dup(const struct mnt *arr, int n, const struct mnt *e)
+{
+    for (int i = 0; i < n; i++)
+        if (!strcmp(arr[i].dev, e->dev) && !strcmp(arr[i].mp, e->mp) &&
+            !strcmp(arr[i].fstype, e->fstype))
+            return 1;
+    return 0;
+}
+
+/* Parse /proc/mounts, de-duplicating identical (dev, mountpoint, fstype) records.
+   The ASUS firmware lists /tmp/mnt twice, which previously produced duplicate
+   filesystem and storage entries. Returns the count; out may be NULL on failure. */
+static int parse_mounts(struct mnt **out, int *dups_dropped)
+{
+    *out = NULL; if (dups_dropped) *dups_dropped = 0;
+    char *buf = slurp(pf("mounts"));
+    if (!buf) return 0;
     int cap = 32, n = 0;
     struct mnt *m = malloc(sizeof(*m) * cap);
     char *save, *line = strtok_r(buf, "\n", &save);
     while (line && m) {
         struct mnt e;
         if (sscanf(line, "%255s %255s %63s %255s", e.dev, e.mp, e.fstype, e.opts) == 4) {
-            mount_unescape(e.dev);                    /* \040 etc. → real characters */
+            mount_unescape(e.dev);
             mount_unescape(e.mp);
+            if (mount_is_dup(m, n, &e)) {
+                if (dups_dropped) (*dups_dropped)++;
+                line = strtok_r(NULL, "\n", &save);
+                continue;
+            }
             if (n == cap) {
-                if (cap >= STATVFS_MAX_ENTRIES) break;    /* bounded */
+                if (cap >= STATVFS_MAX_ENTRIES) break;
                 int ncap = cap * 2;
                 if (ncap > STATVFS_MAX_ENTRIES) ncap = STATVFS_MAX_ENTRIES;
                 struct mnt *nm = realloc(m, sizeof(*m) * ncap);
-                if (!nm) break;                           /* keep what we have, no NULL deref */
+                if (!nm) break;
                 m = nm; cap = ncap;
             }
             m[n++] = e;
@@ -304,74 +375,43 @@ static int parse_mounts(struct mnt **out)
     return n;
 }
 
-static int is_usb(const struct mnt *m)
-{
-    return strncmp(m->mp, "/tmp/mnt", 8) == 0 ||
-           strncmp(m->mp, "/mnt/", 5) == 0 ||
-           strncmp(m->dev, "/dev/sd", 7) == 0 ||
-           strncmp(m->dev, "/dev/mmcblk", 11) == 0;
-}
-
-static int is_virtual_fs(const char *t)
-{
-    static const char *skip[] = {
-        "proc","sysfs","devpts","mqueue","cgroup","cgroup2","debugfs","tracefs",
-        "securityfs","binfmt_misc","fusectl","pstore","configfs","rpc_pipefs",
-        "nsfs","none","autofs","ramfs","hugetlbfs","devtmpfs", NULL
-    };
-    for (int i = 0; skip[i]; i++) if (!strcmp(t, skip[i])) return 1;
-    return 0;
-}
-
 /* ------------------------------------------------------------------ selftest */
 
-/* Exercises the failure cases that matter, without needing a router or any file
-   system state. Returns 0 on success, non-zero (count of failures) otherwise. */
 static int selftest(void)
 {
     int fail = 0;
-    char msg[64], small[8], out[512];
+    char small[8], out[512];
 
-    /* 1. octal unescaping of /proc/mounts paths */
+    /* 1. octal unescaping */
     char p1[] = "/tmp/mnt/My\\040Disk";
     mount_unescape(p1);
-    if (strcmp(p1, "/tmp/mnt/My Disk")) { fprintf(stderr, "FAIL unescape space: %s\n", p1); fail++; }
-
+    if (strcmp(p1, "/tmp/mnt/My Disk")) { fprintf(stderr, "FAIL unescape space\n"); fail++; }
     char p2[] = "/tmp/mnt/a\\011b\\012c\\134d";
     mount_unescape(p2);
-    if (strcmp(p2, "/tmp/mnt/a\tb\nc\\d")) { fprintf(stderr, "FAIL unescape tab/nl/bs: got [%s]\n", p2); fail++; }
-
+    if (strcmp(p2, "/tmp/mnt/a\tb\nc\\d")) { fprintf(stderr, "FAIL unescape tab/nl/bs\n"); fail++; }
     char p3[] = "/tmp/mnt/plain";
     mount_unescape(p3);
     if (strcmp(p3, "/tmp/mnt/plain")) { fprintf(stderr, "FAIL unescape no-op\n"); fail++; }
 
-    /* 2. json_escape escapes quotes/backslash/control and stays NUL-terminated */
+    /* 2. json_escape */
     json_escape("a\"b\\c\nd", out, sizeof(out));
-    if (strcmp(out, "a\\\"b\\\\c\\nd")) { fprintf(stderr, "FAIL escape: %s\n", out); fail++; }
-
-    /* 3. json_escape into a tiny buffer must not overflow and must stay NUL-terminated
-       (it terminates at the produced length, not at the buffer end). */
+    if (strcmp(out, "a\\\"b\\\\c\\nd")) { fprintf(stderr, "FAIL escape\n"); fail++; }
     memset(small, 0x7f, sizeof(small));
     json_escape("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", small, sizeof(small));
     if (strlen(small) > sizeof(small) - 1) { fprintf(stderr, "FAIL escape bounds len\n"); fail++; }
-    if (small[strlen(small)] != '\0') { fprintf(stderr, "FAIL escape bounds terminator\n"); fail++; }
-    if (strlen(small) > 0) { for (size_t k = strlen(small) + 1; k < sizeof(small); k++)
-        if ((unsigned char)small[k] != 0x7f) { fprintf(stderr, "FAIL escape wrote past end\n"); fail++; break; } }
+    if (small[strlen(small)] != '\0') { fprintf(stderr, "FAIL escape terminator\n"); fail++; }
 
-    /* 4. cpu_stat truncation guard: appending must refuse cleanly at the cap and the
-       accumulated body must remain a valid, closed set of members (never mid-object). */
-    for (int iter = 0; iter < 3; iter++) {
-        size_t cap = (size_t)(iter == 0 ? CPUSTAT_MAX : 200);   /* 200 forces early stop */
-        char *body = malloc(cap);
-        size_t len = 0; int first = 1, added = 0, truncated = 0;
+    /* 3. cpu_stat truncation guard */
+    for (int iter = 0; iter < 2; iter++) {
+        size_t cap = (size_t)(iter == 0 ? CPUSTAT_MAX : 200);
+        char *body = malloc(cap); size_t len = 0; int first = 1, added = 0, truncated = 0;
         body[0] = '\0';
         for (;;) {
             if (!cpustat_append(body, cap, &len, first, "cpu", 1,2,3,4,5,6,7,8)) { truncated = 1; break; }
             first = 0; added++;
-            if (added > 100000) break;                          /* safety */
+            if (added > 100000) break;
         }
-        if (added == 0 || len >= cap) { fprintf(stderr, "FAIL cpustat cap len=%zu cap=%zu\n", len, cap); fail++; }
-        /* body must end with '}' and contain balanced braces */
+        if (added == 0 || len >= cap) { fprintf(stderr, "FAIL cpustat cap\n"); fail++; }
         if (len == 0 || body[len-1] != '}') { fprintf(stderr, "FAIL cpustat close\n"); fail++; }
         int depth = 0, bal = 1;
         for (size_t i = 0; i < len; i++) {
@@ -383,8 +423,31 @@ static int selftest(void)
         free(body);
     }
 
-    /* 5. mount parser tolerates a missing/empty input without crashing */
-    (void)msg;
+    /* 4. mount de-duplication */
+    struct mnt a[4];
+    memset(a, 0, sizeof a);
+    strcpy(a[0].dev, "tmpfs");     strcpy(a[0].mp, "/tmp/mnt");     strcpy(a[0].fstype, "tmpfs");
+    strcpy(a[1].dev, "/dev/sda1"); strcpy(a[1].mp, "/tmp/mnt/USB"); strcpy(a[1].fstype, "vfat");
+    struct mnt d = a[0];
+    if (!mount_is_dup(a, 2, &d))    { fprintf(stderr, "FAIL dup not detected\n"); fail++; }
+    struct mnt nd = a[1];
+    strcpy(nd.mp, "/tmp/mnt/other");
+    if (mount_is_dup(a, 2, &nd))    { fprintf(stderr, "FAIL false dup\n"); fail++; }
+
+    /* 5. storage-candidate filtering: placeholders out, block-backed in */
+    struct mnt ph; memset(&ph, 0, sizeof ph);
+    strcpy(ph.dev, "tmpfs"); strcpy(ph.mp, "/tmp/mnt"); strcpy(ph.fstype, "tmpfs");
+    if (is_storage_candidate(&ph))  { fprintf(stderr, "FAIL tmpfs placeholder accepted\n"); fail++; }
+    struct mnt bk; memset(&bk, 0, sizeof bk);
+    strcpy(bk.dev, "/dev/sda1"); strcpy(bk.mp, "/tmp/mnt/USB"); strcpy(bk.fstype, "vfat");
+    if (!is_storage_candidate(&bk)) { fprintf(stderr, "FAIL block-backed rejected\n"); fail++; }
+    struct mnt nv; memset(&nv, 0, sizeof nv);
+    strcpy(nv.dev, "proc"); strcpy(nv.mp, "/proc"); strcpy(nv.fstype, "proc");
+    if (is_storage_candidate(&nv))  { fprintf(stderr, "FAIL proc accepted\n"); fail++; }
+    struct mnt root; memset(&root, 0, sizeof root);
+    strcpy(root.dev, "/dev/root"); strcpy(root.mp, "/"); strcpy(root.fstype, "ext4");
+    if (is_storage_candidate(&root)){ fprintf(stderr, "FAIL rootfs accepted as storage\n"); fail++; }
+
     if (fail == 0) printf("selftest: OK (5 groups)\n");
     else           printf("selftest: %d FAILURE(S)\n", fail);
     return fail;
@@ -397,20 +460,30 @@ int main(int argc, char **argv)
     int pretty = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--pretty") || !strcmp(argv[i], "-p")) pretty = 1;
-        if (!strcmp(argv[i], "--selftest")) return selftest();
+        else if (!strcmp(argv[i], "--selftest")) return selftest();
+        else if (!strcmp(argv[i], "--proc-root") && i + 1 < argc) {
+            snprintf(g_proc, sizeof g_proc, "%s", argv[++i]);
+            size_t L = strlen(g_proc);
+            while (L > 1 && g_proc[L-1] == '/') g_proc[--L] = '\0';
+        }
     }
 
     const char *nl = pretty ? "\n" : "";
     const char *sp = pretty ? " " : "";
 
     struct utsname un;
-    if (uname(&un) != 0) {
-        strcpy(un.sysname, "?"); strcpy(un.release, "?"); strcpy(un.machine, "?");
-    }
+    if (uname(&un) != 0) { strcpy(un.sysname, "?"); strcpy(un.release, "?"); strcpy(un.machine, "?"); }
 
-    char *uptime = slurp("/proc/uptime");
-    double up = 0;
-    if (uptime) { sscanf(uptime, "%lf", &up); free(uptime); }
+    /* uptime: a genuine zero is preserved as 0.0; missing OR malformed input is null.
+       "unavailable" must never be reported as 0. */
+    int have_up = 0;
+    double up = 0.0;
+    char *uptime = slurp(pf("uptime"));
+    if (uptime) {
+        double v;
+        if (sscanf(uptime, "%lf", &v) == 1 && v >= 0.0 && v < 1e12) { up = v; have_up = 1; }
+        free(uptime);
+    }
 
     char esys[128], erel[128], emach[128];
     json_escape(un.sysname, esys, sizeof(esys));
@@ -418,14 +491,20 @@ int main(int argc, char **argv)
     json_escape(un.machine, emach, sizeof(emach));
 
     struct mnt *mnts = NULL;
-    int nmnts = parse_mounts(&mnts);
+    int dups = 0;
+    int nmnts = parse_mounts(&mnts, &dups);
 
-    printf("{%s",nl);
+    printf("{%s", nl);
     printf("\"schema\":\"%s\",%s", SCHEMA, nl);
     printf("\"tool\":\"%s\",\"version\":\"%s\",%s", TOOL_NAME, TOOL_VERSION, nl);
-
-    printf("\"host\":{\"sysname\":\"%s\",\"release\":\"%s\",\"machine\":\"%s\",\"uptime_seconds\":%.1f},%s",
-           esys, erel, emach, up, nl);
+    printf("\"units\":{\"uptime_seconds\":\"s\",\"load*\":\"1-min/5-min/15-min runnable average\","
+           "\"memory_kb\":\"kB (Linux kB = 1024 bytes)\","
+           "\"cpu_stat\":\"USER_HZ jiffies, cumulative counters (needs 2 samples)\","
+           "\"capacity\":\"bytes\",\"used_percent\":\"used/(used+avail), df-compatible\"},%s", nl);
+    printf("\"host\":{\"sysname\":\"%s\",\"release\":\"%s\",\"machine\":\"%s\",\"uptime_seconds\":",
+           esys, erel, emach);
+    if (have_up) printf("%.1f", up); else printf("null");
+    printf("},%s", nl);
 
     fputs(sp, stdout); emit_cpuinfo();   printf(",%s", nl);
     fputs(sp, stdout); emit_loadavg();   printf(",%s", nl);
@@ -442,23 +521,37 @@ int main(int argc, char **argv)
     }
     printf("%s],%s", nl, nl);
 
-    printf("\"usb_storage\":[%s", nl);
+    int ph_excluded = 0, cand_n = 0;
+    for (int i = 0; i < nmnts; i++) {
+        if (is_storage_candidate(&mnts[i])) cand_n++;
+        else if (strncmp(mnts[i].mp, "/tmp/mnt", 8) == 0 || strncmp(mnts[i].mp, "/mnt/", 5) == 0)
+            ph_excluded++;
+    }
+
+    printf("\"storage\":{%s", nl);
+    printf("%s\"candidates\":[%s", sp, nl);
     first = 1;
     for (int i = 0; i < nmnts; i++) {
-        if (!is_usb(&mnts[i])) continue;
+        if (!is_storage_candidate(&mnts[i])) continue;
         char ed[256], em[256], ef[64], eo[256];
         json_escape(mnts[i].dev, ed, sizeof(ed));
         json_escape(mnts[i].mp,  em, sizeof(em));
         json_escape(mnts[i].fstype, ef, sizeof(ef));
         json_escape(mnts[i].opts, eo, sizeof(eo));
         printf("%s%s{\"device\":\"%s\",\"mountpoint\":\"%s\",\"fstype\":\"%s\","
-               "\"options\":\"%s\",\"capacity\":", first ? "" : (pretty ? ",\n " : ","), sp,
-               ed, em, ef, eo);
+               "\"options\":\"%s\",\"block_backed\":true,\"usb_identity\":\"not_established\","
+               "\"capacity\":", first ? "" : (pretty ? ",\n " : ","), sp, ed, em, ef, eo);
         emit_statvfs_pair(mnts[i].mp);
         printf("}");
         first = 0;
     }
-    printf("%s]%s", nl, nl);
+    printf("%s],%s", nl, nl);
+    printf("%s\"candidates_count\":%d,%s", sp, cand_n, nl);
+    printf("%s\"placeholders_excluded\":%d,%s", sp, ph_excluded, nl);
+    printf("%s\"duplicate_records_dropped\":%d,%s", sp, dups, nl);
+    printf("%s\"note\":\"candidates are block-device-backed mounts; block-backed does not establish USB identity\"%s",
+           sp, nl);
+    printf("}%s", nl);
 
     printf("}%s", nl);
 

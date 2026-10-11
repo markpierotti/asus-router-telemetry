@@ -1,71 +1,64 @@
 # ASUS Router Telemetry
 
-A small C program that collects Linux router health as JSON, developed during an investigation of an ASUS RT-AX56U running stock firmware.
+**Custom ARM telemetry on a consumer router, without replacing its firmware.**
 
-**Question:** can useful custom monitoring run on a consumer router without replacing its firmware?
+A C reporter and Python collector developed through firmware analysis, cross-compilation, adversarial testing and validation on a physical ASUS RT-AX56U. The reporter emits Linux system measurements as JSON; the external collector verifies execution, saves history and calculates CPU utilisation. Healthy collection makes zero model calls.
 
-The project combines firmware analysis, ARM cross-compilation and evidence-based validation. The reporter reads system information, emits one document and exits. It opens no network listener and does not change router configuration.
+## Demonstrated on hardware
 
-## Status
-
-| Milestone | Evidence / limitation |
+| Milestone | Recorded result |
 | --- | --- |
-| Analysis toolchain | REA/Ghidra validated against a known-answer fixture; instructions corroborated with GNU objdump |
-| Firmware examination | Downloaded 386_52090 firmware extracted; ARM userland investigated |
-| Reporter | C source cross-built as a static ARM EABI5 executable; offline self-tests and ARM emulation recorded |
-| Physical device | Authenticated inventory confirms firmware 386_45898, Linux 4.1.52 and ARMv7 hardware |
-| On-device reporter execution | **Passed on the physical router**: hash-verified transfer, exit 0, valid JSON and reported cleanup |
-| Persistent deployment / AP / NAS integration | Future work |
+| Reverse-engineering toolchain | REA/Ghidra checked against a known-answer fixture; GNU objdump corroborated instructions |
+| Firmware and live inventory | Downloaded 386_52090 examined; physical unit runs 386_45898, Linux 4.1.52 armv7l |
+| Custom reporter | Static ARM executable runs temporarily on stock firmware |
+| Parser comparison | 26 checks passed, zero failed; 10 separate-sample comparisons remained inconclusive |
+| SSH collector | Two real collections accepted, with artifact verification and cleanup recorded |
+| CPU utilisation | 1.62%, independently recalculated from the two saved aggregate counter sets |
+| Continuous operation / unattended auth / AP / USB NAS | Not yet validated |
 
-See the [hardware test](docs/hardware-test.md) and [validation](docs/validation.md) for the boundary between recorded evidence and demonstrated behavior. This is custom userspace software, not a custom firmware image.
+The [next-phase Hermes prompt](docs/next-phase-prompt.md) prepares a short foreground monitoring trial.
 
-## Try locally
+See [reporter hardware tests](docs/hardware-test.md), [collector hardware tests](docs/collector-hardware-test.md) and [validation](docs/validation.md). This is custom userspace software, not a custom firmware image or a deployed SOC.
 
-Requires a C compiler, Make and Python 3. Linux provides the intended `/proc` inputs. macOS can run parser self-tests and JSON smoke checks, but it cannot validate Linux telemetry collection.
+## Try offline
+
+Requires a C compiler, Make and Python 3.11+ on macOS or another POSIX host:
 
 ```sh
 make test
 ./out/router_health --pretty
+python3 collector/collector.py collect --once --transport mock --data-dir /tmp/router-telemetry-demo
+python3 collector/collector.py status --transport mock --data-dir /tmp/router-telemetry-demo
 ```
 
-The test compiles the reporter, runs its embedded self-tests, parses compact and pretty output as JSON, and checks host identity. On Linux it also requires memory and filesystem information.
+Tests contact no router. Native macOS checks exercise parsers, JSON and process handling; Linux `/proc` telemetry requires Linux. The collector suite includes real controlling-PTY input, watchdog execution, interruption, descendant cleanup, failure classification and incident recovery.
 
-## Build and test ARM
-
-Requires Docker with linux/amd64 support (including emulation on Apple Silicon). The disposable container installs cross-compilation and test tools; it does not contact the router.
+## Build ARM
 
 ```sh
 sh build-arm.sh
 ```
 
-The base image is pinned by digest. Debian package versions are recorded but package resolution is not pinned: **bit-for-bit reproducibility is not guaranteed**. The build fails if native or ARM self-tests, JSON validation, or the static-link check fail.
+Requires Docker with linux/amd64 support. The base image is pinned by digest, but apt package resolution is not pinned; bit-for-bit reproducibility is not guaranteed. The recipe records tool versions and artifact hashes, checks static linkage, and runs ARM self-tests under QEMU. A rebuild is distinct from the historical hardware-tested artifact.
 
-## Output
+## Components
 
-- Host architecture, kernel and uptime
-- CPU information, raw CPU counters and load averages
-- Memory counters
-- Filesystem capacity and candidate USB/storage mount information
+- `src/router_health.c`: reporter v1.0.2, schema `router_health/2`; host, uptime, CPU counters, load, memory, filesystem capacity and storage candidates.
+- `collector/`: foreground Python collector v1.2.0, bounded SSH transport, local history, derived CPU measurements and collection incidents.
+- `tests/`: embedded-test runner, JSON smoke check and synthetic `/proc` fixtures.
+- `docs/`: design, validation, hardware milestones and AI-assisted provenance.
 
-Schema identifier: `router_health/1`. `--pretty` formats output; `--selftest` runs embedded checks. CPU counters need two samples to derive utilization. Storage detection is a path/device heuristic, not proof that a physical USB drive is attached. Missing information should be interpreted as unavailable, not automatically healthy.
+Storage detection remains a path/device heuristic, not proof of USB identity. Missing telemetry is not automatically healthy. [Design notes](docs/design.md) explain the boundaries.
 
-## Engineering decisions
+## Live use
 
-- **Validate the toolchain first:** use known behavior before trusting decompilation.
-- **Inspect the real unit:** downloaded firmware and installed firmware differ.
-- **Keep collection lightweight:** single-shot execution, bounded buffers, no daemon or listener.
-- **Exercise realistic inputs:** escaped spaces in mount paths caused a capacity-reporting bug.
-- **Separate collection from analysis:** the reporter emits structured data; a future external monitor can interpret it.
+Follow the [collector instructions](collector/README.md) to supply your own target, reviewed host keys and artifact hashes. No live target is configured by default. Live collection uploads and executes a temporary program over SSH and removes its owned directory on teardown; it does not install persistent software or alter firmware or network settings.
 
-[Design notes](docs/design.md) describe the implementation and its limits. [Provenance](docs/provenance.md) explains authorship and source selection.
+## Privacy and provenance
 
-## Scope of this repository
+Device credentials, actual host keys, private configuration, raw collection history, vendor firmware and extracted proprietary binaries are excluded. Sanitized fixture documents and curated numeric validation results are included. This repository contains a portable adaptation of the private bench collector, not its private defaults. See [provenance](docs/provenance.md).
 
-Includes the reporter, portable local tests, ARM build recipe and curated project notes. Bench-specific SSH automation, host keys, credentials, raw inventory, vendor firmware and extracted proprietary binaries are excluded. No command here transfers software to a router or enables services.
-
-## AI-assisted development
-
-Mark Pierotti directed the investigation using Hermes and AI coding agents for research, implementation and documentation. Human work included defining the goal, coordinating physical setup, authenticating to the device, challenging conclusions and deciding which evidence justified the next step. AI-generated implementation is identified explicitly rather than presented as unaided authorship.
+Mark Pierotti directed the investigation using Hermes and AI coding agents for research, implementation and review. Human work included defining goals, physical setup, authentication, challenging conclusions and deciding which evidence justified each next step. AI-generated implementation is identified explicitly rather than presented as unaided authorship.
 
 ## Licensing
 

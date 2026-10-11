@@ -1,53 +1,47 @@
 # Validation record
 
-Snapshot date: 2026-10-12. This document distinguishes prior recorded project evidence from tests that a clone can rerun. One physical-router execution is now recorded below; it does not demonstrate long-term reliability.
+Snapshot date: 2026-10-12. Results distinguish private bench hardware work from this portable repository's offline checks.
 
-## Recorded prior evidence
+## Current identities
 
-| Item | Result | Limit |
-| --- | --- | --- |
-| Known-answer fixture | Expected outputs 7, 10, 22, 37, -1 matched recovered logic | Small, unoptimized, non-stripped ELF only |
-| Independent disassembly | GNU objdump corroborated fixture instructions | Does not independently review all reasoning |
-| Reporter self-test | Native Linux and ARM/QEMU passes recorded | Emulation is not the physical router |
-| Mount escaping | Capacity recovered for a real tmpfs path containing a space | Offline Linux test |
-| Live inventory | RT-AX56U HW1.0; firmware 3.0.0.4.386_45898-gfa90458; Linux 4.1.52 armv7l; four ARMv7 cores; VFP/NEON features | Inventory alone did not demonstrate execution; see the hardware test below |
-| Temporary storage | `/tmp` explicitly mounted tmpfs, rw, without noexec | Execution still needs a real test |
-
-The analysed firmware image was 386_52090. Its ELF ABI observations must not be silently attributed to the physical unit running 386_45898. Live tool discovery could not recover ELF headers because the required dump utilities were unavailable. GLIBC_2.26 strings do not alone identify the installed libc release.
-
-## Artifact identity
-
-The unmodified reporter source imported into this repository has SHA-256:
+Reporter source v1.0.2 (imported unchanged):
 
 ```
-4a862423e6f66cb0f640161e2b2a26629bd4dbeedc4287b1528ecb018555fcbb
+8e4ce0e2034886f6e8f1f97cfde76323f5b0276e7b377194134d1df726e4f016
 ```
 
-The earlier recorded ARM artifact (not distributed here) has SHA-256:
+Hardware-tested ARM artifact (not distributed):
 
 ```
-9cf10eb5266cebf14e527354cad80049dedee8a5c624cbceef1add76b8b26273
+b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590
 ```
 
-A new build is not required to have the same artifact hash: apt package versions remain unpinned. Record each build's toolchain and hash.
+Collector base version: 1.2.0. [Import manifest](import-manifest.json) records original bench-file hashes and portable-copy hashes. Paths, examples and default configuration are adapted; the bench project is untouched. Apt packages remain unpinned, so rebuilt artifact hashes may differ.
 
-## Repeatable checks
+## Prior investigation
 
-- `make test`: compiler warnings, five embedded self-test groups, and host JSON smoke checks.
-- `sh build-arm.sh`: native Linux checks, ARM ELF inspection, static-link check, ARM self-test under QEMU and ARM JSON parsing.
+REA/Ghidra recovered a known-answer fixture whose outputs were 7, 10, 22, 37, -1; GNU objdump corroborated instructions. This covered a small, unoptimized, non-stripped ELF. The downloaded ASUS image was 386_52090; the physical router runs 386_45898. Image ABI observations cannot silently establish the live unit's ABI. Inventory identifies Linux 4.1.52 armv7l, four ARMv7 cores and approximately 498 MiB memory. GLIBC symbol strings alone do not identify an installed libc release.
 
-The [hardware test](hardware-test.md) records the artifact hash, transfer checks, exit status, output validation and cleanup outcome from the first successful physical-device run. Persistent deployment, USB disk behavior, AP integration and continuous monitoring remain unverified.
+## Hardware results
 
-## Standalone repository preparation checks
+The [reporter hardware record](hardware-test.md) preserves the first schema-1 pass and the subsequent schema-2 comparison: 26 passed, zero failed, ten separate-sample comparisons inconclusive. The storage placeholder regression is resolved for the no-disk capture.
 
-Executed on 2026-10-12:
+The [collector hardware record](collector-hardware-test.md) records two real collections, accepted samples, cleanup state and independently recalculated 1.62% CPU utilisation. The private bench collector suite ran 85 tests: 84 passed, one skipped. Real controlling-PTY input tests passed when terminal access was permitted; the restricted execution sandbox denied terminal access, so those checks were rerun with local PTY access.
 
-- macOS native build with `cc -O2 -Wall -Wextra -std=c11`: passed without emitted compiler warnings; five self-test groups passed; compact and pretty JSON passed the host smoke checks. Linux telemetry is not asserted on macOS.
-- Linux amd64 build in the cached, digest-pinned GCC container with networking disabled: five self-test groups and JSON smoke checks passed, including positive MemTotal and nonempty filesystem collection.
-- `build-arm.sh` shell syntax and the Python smoke check compilation passed. The new ARM build recipe has not been run end to end in this repository; the ARM emulation results above are prior project evidence.
+## Repeatable repository checks
 
-No router connection or deployment occurred during repository preparation.
+- `make test-reporter`: native compile, five embedded groups, compact/pretty JSON and synthetic `/proc` fixtures. macOS cannot validate real Linux `/proc` collection; fixture statvfs capacity comes from the executing host.
+- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup tests. No router connection.
+- `make test`: both targets.
+- `sh build-arm.sh`: native Linux and ARM/QEMU checks plus static-link inspection, with toolchain hashes recorded. This updated standalone ARM recipe has not been rerun end to end; historical ARM build/emulation evidence belongs to the bench artifact.
 
-## First physical-router execution
+## Portable-copy preparation
 
-On 2026-10-12, Mark ran the temporary bench launcher and supplied its complete terminal transcript. The saved local JSON and diagnostics were subsequently inspected. The reporter returned valid `router_health/1` JSON on Linux 4.1.52 armv7l, with `router_health_exit=0`. The transcript records matching host/router artifact hashes, successful control execution and verified directory removal, ending with status 0. See [the hardware test record](hardware-test.md).
+Executed for the portable repository update:
+
+- `make test` passed on macOS: five embedded reporter groups, compact/pretty JSON, 29 fixture assertions, and 85 collector tests (84 passed, one skipped). The controlling-PTY input tests passed with local terminal access.
+- Native Linux reporter compilation, embedded groups, JSON and the same fixture assertions passed in the cached digest-pinned GCC container with networking disabled and the repository mounted read-only.
+- Packaged mock CLI, foreground-loop shutdown (exit 130 and lock release) and scenario demo passed.
+- Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
+
+No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work.
