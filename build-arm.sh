@@ -4,7 +4,7 @@ set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 IMAGE='gcc@sha256:f6ddfc063e12d8141189d5b5fd1afc64aedc6eb50a6b8876263f9a944fa9f8ca'
 mkdir -p "$HERE/out"
-docker run --rm --platform linux/amd64 -v "$HERE:/work" "$IMAGE" bash -s <<'BUILD'
+docker run -i --rm --platform linux/amd64 -v "$HERE:/work" "$IMAGE" bash -s <<'BUILD'
 set -euo pipefail
 apt-get update -qq
 apt-get install -y -qq gcc-arm-linux-gnueabi binutils file qemu-user-static python3
