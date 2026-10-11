@@ -14,10 +14,10 @@ The project combines firmware analysis, ARM cross-compilation and evidence-based
 | Firmware examination | Downloaded 386_52090 firmware extracted; ARM userland investigated |
 | Reporter | C source cross-built as a static ARM EABI5 executable; offline self-tests and ARM emulation recorded |
 | Physical device | Authenticated inventory confirms firmware 386_45898, Linux 4.1.52 and ARMv7 hardware |
-| On-device reporter execution | **Not established in this snapshot** |
+| On-device reporter execution | **Passed on the physical router**: hash-verified transfer, exit 0, valid JSON and reported cleanup |
 | Persistent deployment / AP / NAS integration | Future work |
 
-See [validation](docs/validation.md) for the boundary between recorded evidence and demonstrated behavior. This is custom userspace software, not a custom firmware image.
+See the [hardware test](docs/hardware-test.md) and [validation](docs/validation.md) for the boundary between recorded evidence and demonstrated behavior. This is custom userspace software, not a custom firmware image.
 
 ## Try locally
 

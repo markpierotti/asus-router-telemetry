@@ -1,6 +1,6 @@
 # Validation record
 
-Snapshot date: 2026-10-12. This document distinguishes prior recorded project evidence from tests that a clone can rerun. It is not a hardware execution certificate.
+Snapshot date: 2026-10-12. This document distinguishes prior recorded project evidence from tests that a clone can rerun. One physical-router execution is now recorded below; it does not demonstrate long-term reliability.
 
 ## Recorded prior evidence
 
@@ -10,7 +10,7 @@ Snapshot date: 2026-10-12. This document distinguishes prior recorded project ev
 | Independent disassembly | GNU objdump corroborated fixture instructions | Does not independently review all reasoning |
 | Reporter self-test | Native Linux and ARM/QEMU passes recorded | Emulation is not the physical router |
 | Mount escaping | Capacity recovered for a real tmpfs path containing a space | Offline Linux test |
-| Live inventory | RT-AX56U HW1.0; firmware 3.0.0.4.386_45898-gfa90458; Linux 4.1.52 armv7l; four ARMv7 cores; VFP/NEON features | Reporter not yet executed in this snapshot |
+| Live inventory | RT-AX56U HW1.0; firmware 3.0.0.4.386_45898-gfa90458; Linux 4.1.52 armv7l; four ARMv7 cores; VFP/NEON features | Inventory alone did not demonstrate execution; see the hardware test below |
 | Temporary storage | `/tmp` explicitly mounted tmpfs, rw, without noexec | Execution still needs a real test |
 
 The analysed firmware image was 386_52090. Its ELF ABI observations must not be silently attributed to the physical unit running 386_45898. Live tool discovery could not recover ELF headers because the required dump utilities were unavailable. GLIBC_2.26 strings do not alone identify the installed libc release.
@@ -36,7 +36,7 @@ A new build is not required to have the same artifact hash: apt package versions
 - `make test`: compiler warnings, five embedded self-test groups, and host JSON smoke checks.
 - `sh build-arm.sh`: native Linux checks, ARM ELF inspection, static-link check, ARM self-test under QEMU and ARM JSON parsing.
 
-A genuine on-device milestone should record the exact artifact hash, transfer integrity, real exit status, output validation and cleanup outcome. Persistent deployment, USB disk behavior, AP integration and continuous monitoring remain unverified.
+The [hardware test](hardware-test.md) records the artifact hash, transfer checks, exit status, output validation and cleanup outcome from the first successful physical-device run. Persistent deployment, USB disk behavior, AP integration and continuous monitoring remain unverified.
 
 ## Standalone repository preparation checks
 
@@ -47,3 +47,7 @@ Executed on 2026-10-12:
 - `build-arm.sh` shell syntax and the Python smoke check compilation passed. The new ARM build recipe has not been run end to end in this repository; the ARM emulation results above are prior project evidence.
 
 No router connection or deployment occurred during repository preparation.
+
+## First physical-router execution
+
+On 2026-10-12, Mark ran the temporary bench launcher and supplied its complete terminal transcript. The saved local JSON and diagnostics were subsequently inspected. The reporter returned valid `router_health/1` JSON on Linux 4.1.52 armv7l, with `router_health_exit=0`. The transcript records matching host/router artifact hashes, successful control execution and verified directory removal, ending with status 0. See [the hardware test record](hardware-test.md).
