@@ -728,8 +728,10 @@ class TestSignalLifecycle(TempCase):
                                                "FAKE_SSH_MASTER_STATE": down})
         tr.start()
         result = tr._exit_master()
-        self.assertIs(result, True, "a completed -O exit was not verified as gone")
+        self.assertEqual(result, transport.MS_GONE,
+                         "a completed -O exit was not verified as gone")
         self.assertTrue(os.path.isfile(log), "-O exit was never sent")
+        self.assertFalse(transport.shutdown_is_unconfirmed(result))
         tr.close()
 
     def test_master_shutdown_is_not_inferred_from_absence_of_error(self):
@@ -740,39 +742,50 @@ class TestSignalLifecycle(TempCase):
         tr.start()
         messages = []
         tr.log = messages.append
-        result = tr._exit_master()
-        self.assertIs(result, False,
-                      "a master that still answers was reported as shut down")
-        self.assertTrue(any("still answered" in m for m in messages), messages)
+        # `-O exit` returns 0 while the master keeps answering, so success cannot be
+        # inferred from the absence of an error. Exercise the PUBLIC path (close()).
         tr.close()
+        self.assertEqual(tr.master_shutdown, transport.MS_STILL_ANSWERING,
+                         "a master that still answers was reported as shut down")
+        self.assertTrue(transport.shutdown_is_unconfirmed(tr.master_shutdown))
+        self.assertIsNotNone(tr.lifecycle_error,
+                             "unconfirmed shutdown not surfaced by close()")
+        self.assertTrue(any("NOT confirmed" in m for m in messages), messages)
 
-    def test_master_wont_exit_kills_only_the_reported_pid(self):
+    def test_master_wont_exit_signals_no_process_at_all(self):
+        """A cached PID is never signalled.
+
+        The previous revision killed "the PID ssh reported". A PID carries no
+        executable, owner or start-identity evidence, and can be reused, so the
+        fallback was REMOVED rather than hardened: an unconfirmed shutdown is
+        recorded instead. This asserts both halves — nothing is signalled, and the
+        fact still reaches the caller.
+        """
         down = os.path.join(self.tmp, "never-gone")
         tr = harness.make_transport(self.tmp, "master_wont_exit",
-                                    extra_env={"FAKE_SSH_MASTER_PID": "1",
-                                               "FAKE_SSH_MASTER_STATE": down})
+                                    extra_env={"FAKE_SSH_MASTER_STATE": down,
+                                               "FAKE_SSH_MASTER_PID": str(os.getpid())})
         tr.start()
-        tr._master_pid = 1
-        killed = []
-        orig = os.kill
-
-        def spy(pid, sig):
-            killed.append((pid, sig))
-            raise ProcessLookupError
-
-        os.kill = spy
+        sent = []
+        real_kill = os.kill
+        real_killpg = getattr(os, "killpg", None)
         try:
-            tr._kill_master_pid()
+            os.kill = lambda pid, sig: sent.append((pid, sig))
+            if real_killpg is not None:
+                os.killpg = lambda pgid, sig: sent.append(("pg", pgid, sig))
+            tr.close()
         finally:
-            os.kill = orig
-        self.assertTrue(killed)
-        self.assertEqual({pid for pid, _ in killed}, {1},
-                         "something other than the reported master pid was signalled")
-        tr.close()
+            os.kill = real_kill
+            if real_killpg is not None:
+                os.killpg = real_killpg
+        self.assertEqual(sent, [],
+                         "a process was signalled from a cached PID: %r" % (sent,))
+        self.assertEqual(tr.master_shutdown, transport.MS_STILL_ANSWERING)
+        self.assertIsNotNone(tr.lifecycle_error,
+                             "an unconfirmed shutdown was not surfaced on the transport")
+        self.assertFalse(hasattr(tr, "_kill_master_pid"),
+                         "the PID-killing fallback still exists")
 
-
-# ============================================================ F6: identity
-class TestBootIdentity(TempCase):
     def test_explicit_boot_identity_detects_a_reboot_uptime_would_miss(self):
         c, store = self.collector("boot_change")
         c.collect_once()

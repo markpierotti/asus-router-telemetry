@@ -43,6 +43,13 @@
 #                           means the master has gone away
 #   FAKE_SSH_MASTER_PID     the pid `-O check` reports (default 4242)
 #   FAKE_SSH_EXIT_LOG       append a line when `-O exit` is received
+#   FAKE_SSH_EXTRA          compose a SECOND, independent fault with the mode. It is
+#                           honoured by the two branches where a combination is
+#                           genuinely needed (the artifact transfer and the reporter
+#                           run), so e.g. mode=cleanup_fail FAKE_SSH_EXTRA=transfer_bad_json
+#                           gives "the push mismatched AND the removal failed after
+#                           mkdir", and mode=master_wont_exit FAKE_SSH_EXTRA=reporter_fail
+#                           keeps the master alive while the collection fails.
 set -u
 
 KAT="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -70,7 +77,11 @@ _master_check() {
     echo "Control socket connect: No such file or directory" 1>&2
     return 255
   fi
-  echo "Master running (pid=${FAKE_SSH_MASTER_PID:-4242})"
+  # FIDELITY: real OpenSSH writes the SUCCESS diagnostic too, and it goes to STDERR,
+  # CRLF-terminated (`fprintf(stderr, "Master running (pid=%d)\r\n", ...)`). Writing
+  # it on stdout made the fake easier to pass than the real client, which hid the
+  # stdout-only PID parse. Keep it on stderr.
+  printf 'Master running (pid=%s)\r\n' "${FAKE_SSH_MASTER_PID:-4242}" 1>&2
   return 0
 }
 
@@ -160,7 +171,7 @@ case "$cmd" in
       esac ;;
   *"mkdir -m 700"*)     exit 0 ;;
   *"cat > "*)
-      if [ "$mode" = "transfer_bad_json" ]; then
+      if [ "${FAKE_SSH_EXTRA:-$mode}" = "transfer_bad_json" ]; then
         printf 'SHA256(x)= %s\n' "$(python3 -c 'print("zz"*2048)')"
         exit 0
       fi
@@ -186,7 +197,9 @@ case "$cmd" in
         *)                 echo control-exec-ok; exit 0 ;;
       esac ;;
   *"out.json"*)
-      case "$mode" in
+      # FAKE_SSH_EXTRA (when set) selects the reporter fault independently of the
+      # mode, so the master-lifecycle fault can be composed with a collection fault.
+      case "${FAKE_SSH_EXTRA:-$mode}" in
         timeout|timeout_cleanup_fail)
             printf 'router_health_wd_fired=1\n' 1>&2; exit 137 ;;
         oom_kill)
@@ -200,6 +213,11 @@ case "$cmd" in
       case "$mode" in
         cleanup_fail|timeout_cleanup_fail) echo REMOVAL_FAILED 1>&2; exit 1 ;;
         cleanup_no_marker)                 exit 0 ;;
+        # A removal that takes long enough for a test to interrupt the teardown
+        # WHILE the removal is in flight. The directory is left in place, which is
+        # exactly the real-world case: the operator cancels, and nobody knows whether
+        # the remote directory survived.
+        slow_cleanup)                      sleep 30; echo REMOVED; exit 0 ;;
         *)                                 echo REMOVED; exit 0 ;;
       esac ;;
 esac
