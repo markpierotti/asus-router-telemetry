@@ -163,6 +163,19 @@ def update_state(state, attempt, sample_meta=None, *, open_after=3, resolve_afte
     return state
 
 
+class _RemoteFacts:
+    """What is known about a remote directory when no session reached the collector.
+
+    Stands in for a session in the teardown record: a provision that was cancelled
+    never returns one, but the transport still reports the path it chose and how far
+    its ownership was established.
+    """
+
+    def __init__(self, remote_dir, ownership):
+        self.remote_dir = remote_dir
+        self.ownership = ownership
+
+
 class Collector:
     def __init__(self, transport, store, *, open_after=3, resolve_after=2,
                  artifact_sha=None, host_label=None, log=None,
@@ -178,6 +191,8 @@ class Collector:
         self.monotonic = monotonic
         self._session = None
         self._last_session = None       # kept so a teardown failure can name its path
+        self._start_failure = None      # what transport.start() raised THIS attempt
+        self._held_cancel = None        # a cancellation waiting for the attempt record
         self.cleanup_error = None       # set when a teardown fails; surfaced by the CLI
         self.cleanup_interrupted = False  # teardown was cancelled; removal UNCONFIRMED
         self.lifecycle_error = None     # master shutdown could not be confirmed
@@ -186,7 +201,21 @@ class Collector:
     # ------------------------------------------------------------- sessions
     def _ensure_session(self):
         if self._session is None:
-            self._session = self.transport.start()
+            try:
+                self._session = self.transport.start()
+            except BaseException as e:              # noqa: BLE001 - re-raised at once
+                # Provisioning facts have exactly ONE source: the exception a failed
+                # start() lets out. It is remembered HERE, before any classifier
+                # sees it, so whether the facts survive cannot depend on which branch
+                # of collect_once() matched - or on a branch remembering to keep its
+                # own exception, which is how they were lost for `unreachable`,
+                # `timeout` and the authentication classes.
+                self._start_failure = e
+                if not isinstance(e, Exception):
+                    # A cancellation is never classified, so no attempt record will
+                    # carry these facts; keep them for the teardown record instead.
+                    self._note_cancelled_start(e)
+                raise
         return self._session
 
     def _drop_session(self):
@@ -207,17 +236,55 @@ class Collector:
             # An ordinary Exception (a failed removal, an unreachable device) is a
             # teardown FAILURE: it is recorded and the run continues to its normal
             # classification. Only a cancellation-class BaseException is re-raised.
-            self.cleanup_error = sanitize_detail(
-                e if isinstance(e, Exception) else
-                ("teardown was INTERRUPTED by %s; removal of the remote directory is "
-                 "UNCONFIRMED" % type(e).__name__))
-            if not isinstance(e, Exception):
-                self.cleanup_interrupted = True
-            self.log("cleanup: %s" % self.cleanup_error)
-            if not isinstance(e, Exception):
+            cancelled = not isinstance(e, Exception)
+            facts = getattr(e, "teardown_facts", None) if cancelled else None
+            if not isinstance(facts, dict):
+                facts = None
+            if facts is not None and facts.get("cleanup_ok") is True:
+                # STAGE-SPECIFIC. The transport says the directory's removal was
+                # already CONFIRMED and the cancellation arrived later, while the
+                # control master was being stopped. Recording "removal UNCONFIRMED"
+                # here would queue a directory that is known to be gone for manual
+                # reconciliation. What is uncertain is the MASTER, and its verdict is
+                # lifted from the transport by _capture_transport_lifecycle() below.
+                self.log("teardown was INTERRUPTED by %s while the control master was "
+                         "being stopped; the remote directory's removal had already "
+                         "been confirmed" % type(e).__name__)
+            else:
+                if facts is not None and not facts.get("cleanup_interrupted"):
+                    # the removal FAILED for its own reason before the cancellation
+                    # arrived: keep that reason instead of calling it an interruption
+                    self.cleanup_error = sanitize_detail(
+                        facts.get("cleanup_detail") or
+                        "removal of the remote directory is UNCONFIRMED (it had not "
+                        "succeeded when teardown was interrupted by %s)" % type(e).__name__)
+                else:
+                    self.cleanup_error = sanitize_detail(
+                        e if not cancelled else
+                        ("teardown was INTERRUPTED by %s; removal of the remote directory "
+                         "is UNCONFIRMED" % type(e).__name__))
+                    if cancelled:
+                        self.cleanup_interrupted = True
+                self.log("cleanup: %s" % self.cleanup_error)
+            if cancelled:
                 raise
         finally:
             self._capture_transport_lifecycle()
+
+    def _drop_session_in_attempt(self):
+        """Tear down from INSIDE an attempt, holding a cancellation for its record.
+
+        ``_drop_session`` re-raises a cancellation once it has noted what the teardown
+        could not confirm. Raised straight out of a classifier branch it would take
+        the attempt's own outcome with it: the failure has already been classified,
+        and recording it takes only bounded local writes. So the cancellation is
+        HELD here and re-raised by ``collect_once`` as soon as the attempt record
+        is written. It is never swallowed, and no remote work runs while it is held.
+        """
+        try:
+            self._drop_session()
+        except BaseException as e:                  # noqa: BLE001 - cancellations only
+            self._held_cancel = e
 
     def _capture_transport_lifecycle(self):
         """Lift the transport's master-shutdown verdict into the collector.
@@ -323,7 +390,8 @@ class Collector:
         ownership = "none"
         provision_cleanup_ok = None
         provision_cleanup_detail = None
-        caught = None
+        self._start_failure = None      # per-attempt, like the three below
+        self._held_cancel = None
         self.cleanup_error = None       # per-attempt: reset so it reflects THIS attempt
         self.cleanup_interrupted = False
 
@@ -351,47 +419,47 @@ class Collector:
         except SchemaInvalid as e:
             outcome, detail = OUTCOME_SCHEMA, str(e)
         except ProvisioningError as e:
-            outcome, detail, caught = OUTCOME_PROVISION, str(e), e
-            self._drop_session()
+            outcome, detail = OUTCOME_PROVISION, str(e)
+            self._drop_session_in_attempt()
         except ControlMasterLost as e:
-            outcome, detail, caught = OUTCOME_MASTER_LOST, str(e), e
-            self._drop_session()
+            outcome, detail = OUTCOME_MASTER_LOST, str(e)
+            self._drop_session_in_attempt()
         except TransportAuthError as e:
             outcome, detail = OUTCOME_AUTH, str(e)
-            self._drop_session()
+            self._drop_session_in_attempt()
         except TransportHostKeyError as e:
             outcome, detail = OUTCOME_HOSTKEY, str(e)
-            self._drop_session()
+            self._drop_session_in_attempt()
         except TransportUnreachableError as e:
             outcome = OUTCOME_UNREACHABLE
             detail = str(e) + " (this alone does not prove the router is down)"
-            self._drop_session()
+            self._drop_session_in_attempt()
         except RemoteTimeout as e:
             outcome, detail = OUTCOME_TIMEOUT, str(e)
-            self._drop_session()
+            self._drop_session_in_attempt()
         except RemoteCommandError as e:
-            outcome, detail, caught = OUTCOME_REPORTER_FAILURE, str(e), e
-            self._drop_session()
+            outcome, detail = OUTCOME_REPORTER_FAILURE, str(e)
+            self._drop_session_in_attempt()
         except ArtifactMismatch as e:
-            outcome, detail, caught = OUTCOME_ARTIFACT, str(e), e
-            self._drop_session()
+            outcome, detail = OUTCOME_ARTIFACT, str(e)
+            self._drop_session_in_attempt()
         except OutputLimitExceeded as e:
             # the device sent more output than the byte budget allows: a classified
             # collection failure, not an unbounded buffer
-            outcome, detail, caught = OUTCOME_OVERFLOW, str(e), e
-            self._drop_session()
+            outcome, detail = OUTCOME_OVERFLOW, str(e)
+            self._drop_session_in_attempt()
         except QuotaExceeded as e:
             # local storage refused the write; the reporter itself was fine, so the
             # session is kept for the next attempt
             outcome, detail = OUTCOME_STORAGE, str(e)
         except StorageError as e:
-            outcome, detail, caught = OUTCOME_STORAGE, str(e), e
+            outcome, detail = OUTCOME_STORAGE, str(e)
         except TransportError as e:
-            outcome, detail, caught = OUTCOME_TRANSPORT, str(e), e
-            self._drop_session()
+            outcome, detail = OUTCOME_TRANSPORT, str(e)
+            self._drop_session_in_attempt()
         except TelemetryError as e:
             outcome, detail = OUTCOME_TRANSPORT, str(e)
-            self._drop_session()
+            self._drop_session_in_attempt()
         except Exception as e:                          # noqa: BLE001 - containment
             # The FINAL catch-all. A device response or a local fault that the
             # taxonomy above did not name (a missing ssh binary, an unreadable
@@ -400,18 +468,21 @@ class Collector:
             # escaping as an unclassified crash that loses it.
             outcome = OUTCOME_INTERNAL
             detail = "%s: %s" % (type(e).__name__, e)
-            caught = e
-            self._drop_session()
+            self._drop_session_in_attempt()
 
         # PROVISIONING FACTS ARE FOLDED IN FOR EVERY CLASSIFICATION, not only for
         # ProvisioningError. The transport attaches them to whichever exception ended
         # the provisioning phase — ControlMasterLost, ArtifactMismatch,
-        # OutputLimitExceeded, StorageError, an internal error — and dropping them would
-        # record `cleanup_ok: true` and lose the exact path of a directory that may
-        # still exist on the router. The OUTCOME CLASS is untouched: only the
-        # cleanup/ownership evidence is taken from the exception.
-        if caught is not None:
-            rd, own, ok, det = self._provision_facts(caught)
+        # TransportUnreachableError, RemoteTimeout, an authentication class, an
+        # internal error — and dropping them would record `cleanup_ok: true` and lose
+        # the exact path of a directory that may still exist on the router. They are
+        # read from the exception _ensure_session() remembered, NOT from the branch
+        # that classified it, so no branch can drop them. The OUTCOME CLASS is
+        # untouched: only the cleanup/ownership evidence is taken from the exception,
+        # and a failure with NO facts attached changes nothing (see _provision_facts).
+        start_failure, self._start_failure = self._start_failure, None
+        if start_failure is not None:
+            rd, own, ok, det = self._provision_facts(start_failure)
             if rd:
                 remote_dir = rd
             if own is not None:
@@ -446,6 +517,12 @@ class Collector:
             "cleanup_detail": sanitize_detail(cleanup_detail) if cleanup_detail else None,
         }
         self._persist_attempt(attempt, sample_meta)
+        held, self._held_cancel = self._held_cancel, None
+        if held is not None:
+            # see _drop_session_in_attempt(): the record above is why it was held
+            self.log("attempt recorded as %s before %s is propagated: %s"
+                     % (outcome, type(held).__name__, attempt["detail"]))
+            raise held
         return attempt
 
     @staticmethod
@@ -478,6 +555,34 @@ class Collector:
         # the ownership the live session already reported, so the absence is returned
         # as None and the caller keeps what it has.
         return (None, None, None, None)
+
+    def _note_cancelled_start(self, e):
+        """Keep the remote-state facts of a provision that a CANCELLATION ended.
+
+        ``transport.start()`` reconciles its own directory and stops its own master
+        before it lets ANY exception out, and attaches the result to that exception
+        - a cancellation included. A cancelled attempt is not classified, so there
+        is no attempt record to carry those facts; they are lifted into the SAME
+        teardown channel that a cancelled session teardown uses. ``close()`` then
+        writes the durable ``teardown`` record and, when a directory's removal is
+        unconfirmed, the pending-cleanup entry naming the exact path.
+
+        Nothing is recorded when no facts are attached (a cancellation at the
+        password prompt, before any remote name was chosen).
+        """
+        rd, own, ok, det = self._provision_facts(e)
+        if rd is None and own is None and ok is None:
+            return
+        self._last_session = _RemoteFacts(rd, own if own is not None else "unknown")
+        if ok is False:
+            facts = getattr(e, "provision_facts", None)
+            self.cleanup_error = sanitize_detail(
+                det or "removal of the remote directory is UNCONFIRMED (provisioning "
+                       "was cancelled by %s)" % type(e).__name__)
+            self.cleanup_interrupted = bool(
+                isinstance(facts, dict) and facts.get("cleanup_interrupted"))
+            self.log("cleanup: %s" % self.cleanup_error)
+        self._capture_transport_lifecycle()
 
     def _record_pending_cleanup(self, remote_dir, ownership, detail):
         """Durably record a remote directory whose removal is NOT confirmed.

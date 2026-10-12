@@ -323,7 +323,15 @@ def cmd_collect(args):
         try:
             collector.close()
         except KeyboardInterrupt:
-            log("teardown was interrupted; cleanup is recorded as UNCERTAIN")
+            # Say which it was. An interrupt during the master exit can follow a
+            # directory removal that was already confirmed, and a master the
+            # follow-up check then found gone: "cleanup is UNCERTAIN" would be false.
+            if collector.cleanup_error or collector.lifecycle_error:
+                log("teardown was interrupted; what could not be confirmed is recorded "
+                    "(see the SEPARATE FAILURE line below)")
+            else:
+                log("teardown was interrupted; the directory removal and the master "
+                    "shutdown had both been confirmed")
             if rc == EXIT_OK:
                 rc = EXIT_INTERRUPTED
         except BaseException as e:                      # noqa: BLE001

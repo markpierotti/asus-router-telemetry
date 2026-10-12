@@ -119,8 +119,15 @@ MS_GONE = "shutdown-verified"                     # the follow-up probe says it 
 MS_STILL_ANSWERING = "shutdown-unconfirmed: master still answers the probe"
 MS_PROBE_TIMEOUT = "shutdown-unconfirmed: the follow-up probe timed out"
 MS_EXIT_FAILED = "shutdown-unconfirmed: the -O exit command did not complete"
+# A CANCELLATION during the shutdown itself. Kept apart from the two results above
+# because the cause is the operator's own signal, not the master or the link: the
+# exit request was abandoned and the master still answers, or the follow-up probe was
+# abandoned and the master's state is UNKNOWN.
+MS_EXIT_INTERRUPTED = "shutdown-unconfirmed: the -O exit command was interrupted"
+MS_PROBE_INTERRUPTED = "shutdown-unconfirmed: the follow-up probe was interrupted"
 
-_UNCONFIRMED_SHUTDOWNS = (MS_STILL_ANSWERING, MS_PROBE_TIMEOUT, MS_EXIT_FAILED)
+_UNCONFIRMED_SHUTDOWNS = (MS_STILL_ANSWERING, MS_PROBE_TIMEOUT, MS_EXIT_FAILED,
+                          MS_EXIT_INTERRUPTED, MS_PROBE_INTERRUPTED)
 
 
 def shutdown_is_unconfirmed(result):
@@ -906,18 +913,45 @@ class SSHTransport:
         immediately and without any identity check, so the fallback was removed rather
         than hardened. The consequence is recorded instead: an unconfirmed shutdown
         becomes ``lifecycle_error`` on the transport, which the collector persists and
-        reflects in the exit status. A master that genuinely will not exit therefore
-        lingers until its ``ControlPersist`` idle timeout — a resource cost that is
-        reported, not a wrong process that is killed.
+        reflects in the exit status. A master that genuinely will not exit is
+        therefore left running — a resource cost that is reported, not a wrong
+        process that is killed. ``ControlPersist`` is an IDLE timeout: it ends a
+        master that has had no client for that long, and is NOT a deadline by which a
+        stuck or still-busy master is guaranteed to be gone.
+
+        A CANCELLATION during the shutdown is re-raised from here, but only AFTER the
+        bounded follow-up probe (see ``_shutdown_master``). ``close()`` calls
+        ``_shutdown_master`` directly so that it can also record the verdict and
+        release the local resources before the cancellation continues.
+        """
+        result, interrupt = self._shutdown_master(verify)
+        if interrupt is not None:
+            raise interrupt
+        return result
+
+    def _shutdown_master(self, verify=True):
+        """The shutdown itself. Returns ``(result, interrupt)`` and raises neither.
+
+        ``interrupt`` is the cancellation-class exception (KeyboardInterrupt from
+        Ctrl-C, or from SIGTERM/SIGHUP as routed by the CLI) that arrived during the
+        exit request or the follow-up probe, or None. It is HELD rather than
+        swallowed or allowed to skip the evidence: catching it and carrying on, as an
+        earlier revision did, lost the operator's cancellation (a run that should
+        have ended 130 continued, and could report ``shutdown-verified``); letting
+        it straight through would leave the master's state unrecorded. The only work
+        done while it is held is ONE bounded ``-O check``. Nothing is retried: an
+        interrupted exit request is abandoned, and what the probe then observes is
+        the recorded result. The caller MUST re-raise ``interrupt``.
         """
         if not self._ctrl_path:
-            return MS_NOT_ATTEMPTED
+            return MS_NOT_ATTEMPTED, None
         known_up = self._master_up
         socket_present = os.path.exists(self._ctrl_path)
         self._master_up = False
         if not (known_up or socket_present):
-            return MS_NOT_ATTEMPTED
+            return MS_NOT_ATTEMPTED, None
         exit_failed = False
+        interrupt = None
         try:
             rc, _out, err = run_bounded(
                 [self.ssh_bin] + self._ssh_opts() + [
@@ -928,28 +962,53 @@ class SSHTransport:
             if rc != 0:
                 exit_failed = True
                 self.log("ssh -O exit returned %d: %s" % (rc, _oneline(err)))
-        except BaseException as e:                           # noqa: BLE001 - best effort
+        except Exception as e:                               # noqa: BLE001 - best effort
             exit_failed = True
             self.log("ssh -O exit did not complete: %s" % sanitize_detail(e))
+        except BaseException as e:                           # noqa: BLE001 - held, see above
+            interrupt = e
+            self.log("ssh -O exit was INTERRUPTED by %s; the cancellation is kept and "
+                     "re-raised after one bounded check of the master" % type(e).__name__)
         if not verify:
-            return MS_NOT_ATTEMPTED
-        alive, pid, probe_failed = self._master_check()
+            return MS_NOT_ATTEMPTED, interrupt
+        alive, pid, probe_failed, probe_interrupted = False, None, True, False
+        try:
+            alive, pid, probe_failed = self._master_check()
+        except Exception:                                    # noqa: BLE001
+            if interrupt is None:
+                raise
+            # a held cancellation must not be displaced by a probe fault: the probe
+            # could not be completed, so the master's state stays UNKNOWN
+        except BaseException as e:                           # noqa: BLE001 - held, see above
+            probe_interrupted = True
+            if interrupt is None:
+                interrupt = e
+            self.log("the follow-up master check was INTERRUPTED by %s; the master's "
+                     "state is UNKNOWN" % type(e).__name__)
         self._master_pid = pid if (pid and pid > 0) else self._master_pid
+        if probe_interrupted:
+            return MS_PROBE_INTERRUPTED, interrupt
         if probe_failed:
-            return MS_PROBE_TIMEOUT
+            return MS_PROBE_TIMEOUT, interrupt
         if not alive:
-            return MS_GONE
+            return MS_GONE, interrupt
         # The socket still answers. That is a positive observation, not an inference.
-        return MS_STILL_ANSWERING if not exit_failed else MS_EXIT_FAILED
+        if interrupt is not None:
+            return MS_EXIT_INTERRUPTED, interrupt
+        return (MS_STILL_ANSWERING if not exit_failed else MS_EXIT_FAILED), None
 
     def _start_master(self):
         try:
             self._start_master_inner()
         except BaseException:
             # even a failure or an interruption must not leave a master or a
-            # control-socket directory behind
-            self._exit_master(verify=False)
-            self._release_master_resources()
+            # control-socket directory behind. The release is in its own `finally`
+            # because the best-effort exit can now re-raise a cancellation of its
+            # own, which then takes precedence over the failure being handled.
+            try:
+                self._exit_master(verify=False)
+            finally:
+                self._release_master_resources()
             raise
 
     def _start_master_inner(self):
@@ -1056,38 +1115,65 @@ class SSHTransport:
             session.provisioned = False
             cleanup_ok = True
             cleanup_detail = None
+            cleanup_interrupted = False
+            cancelled = None        # a cancellation that arrived WHILE reconciling
             try:
-                self._dispose(session)
-                session.ownership = "none"
-            except Exception as ce:                          # noqa: BLE001
-                cleanup_ok = False
-                cleanup_detail = sanitize_detail(ce)
-                self.log("cleanup after failed provision did not succeed: %s" % cleanup_detail)
-            finally:
-                self.close()
+                try:
+                    self._dispose(session)
+                    session.ownership = "none"
+                except Exception as ce:                      # noqa: BLE001
+                    cleanup_ok = False
+                    cleanup_detail = sanitize_detail(ce)
+                    self.log("cleanup after failed provision did not succeed: %s"
+                             % cleanup_detail)
+                except BaseException as ce:                  # noqa: BLE001 - cancellation
+                    cleanup_ok = False
+                    cleanup_interrupted = True
+                    cleanup_detail = (
+                        "removal of router dir %s after a failed provision was "
+                        "INTERRUPTED by %s; its removal is UNCONFIRMED"
+                        % (session.remote_dir, type(ce).__name__))
+                    self.log("cleanup after failed provision: %s" % cleanup_detail)
+                    raise
+                finally:
+                    self.close()
+            except BaseException as ce:                      # noqa: BLE001
+                if isinstance(ce, Exception):
+                    raise
+                # A cancellation during the removal or during the master exit. It is
+                # the exception that must leave start() - but not at the price of the
+                # facts below, which is what a bare re-raise from here would cost.
+                cancelled = ce
             # Carry the provisioning-cleanup outcome OUT to the caller. A failed
             # provision is exactly when a remote directory is most likely to be left
             # behind, and the attempt record must say so rather than defaulting to
             # cleanup_ok=true.
             #
             # The facts are attached as ONE dict so their PRESENCE is unambiguous, and
-            # they are attached whatever the exception CLASS: ControlMasterLost,
-            # ArtifactMismatch, OutputLimitExceeded, StorageError and any transport
-            # error that ended the provisioning phase all get them. The individual
-            # attributes are kept too, for callers and test doubles written against the
-            # earlier shape.
+            # they are attached to WHATEVER leaves: any exception class that ended the
+            # provisioning phase (ControlMasterLost, ArtifactMismatch,
+            # TransportUnreachableError, ...), a cancellation that ended it, and a
+            # cancellation that arrived afterwards while this handler was reconciling.
+            # The individual attributes are kept too, for callers and test doubles
+            # written against the earlier shape.
+            leaving = e if cancelled is None else cancelled
+            if leaving is not e:
+                self.log("provisioning had already failed (%s: %s) when %s arrived; the "
+                         "cancellation is propagated with the provisioning facts"
+                         % (type(e).__name__, sanitize_detail(e), type(leaving).__name__))
             facts = {
                 "remote_dir": session.remote_dir,
                 "remote_ownership": session.ownership,
                 "cleanup_ok": cleanup_ok,
                 "cleanup_detail": cleanup_detail,
+                "cleanup_interrupted": cleanup_interrupted,
             }
-            setattr(e, "provision_facts", facts)
-            setattr(e, "remote_dir", session.remote_dir)
-            setattr(e, "remote_ownership", session.ownership)
-            setattr(e, "provision_cleanup_ok", cleanup_ok)
-            setattr(e, "provision_cleanup_detail", cleanup_detail)
-            raise e
+            setattr(leaving, "provision_facts", facts)
+            setattr(leaving, "remote_dir", session.remote_dir)
+            setattr(leaving, "remote_ownership", session.ownership)
+            setattr(leaving, "provision_cleanup_ok", cleanup_ok)
+            setattr(leaving, "provision_cleanup_detail", cleanup_detail)
+            raise leaving
         return session
 
     def _provision(self, session):
@@ -1314,14 +1400,47 @@ class SSHTransport:
 
     def stop(self, session):
         """Tear the session down. A cleanup failure is raised AFTER the master is
-        closed, so teardown always completes."""
+        closed, so teardown always completes.
+
+        A CANCELLATION leaves with ``teardown_facts`` attached, because "teardown was
+        interrupted" is not one fact: an interrupt during the REMOVAL leaves the
+        directory unconfirmed, while an interrupt during the MASTER EXIT that follows
+        a confirmed removal leaves no directory to reconcile at all. The caller needs
+        to know which, or it would queue a removed directory for manual cleanup - or
+        lose the reason an earlier removal had already failed.
+        """
         err = None
+        removal_ok = False
+        removal_detail = None
+        removal_interrupted = False
         try:
-            self._dispose(session)
-        except CleanupError as e:
-            err = e
-        finally:
-            self.close()
+            try:
+                self._dispose(session)
+                removal_ok = True
+            except CleanupError as e:
+                err = e
+                removal_detail = sanitize_detail(e)
+            except BaseException as e:                       # noqa: BLE001 - re-raised
+                removal_interrupted = not isinstance(e, Exception)
+                removal_detail = (
+                    "removal of router dir %s was INTERRUPTED by %s; its removal is "
+                    "UNCONFIRMED" % (session.remote_dir, type(e).__name__)
+                ) if removal_interrupted else sanitize_detail(e)
+                raise
+            finally:
+                self.close()
+        except BaseException as e:                           # noqa: BLE001 - re-raised
+            if not isinstance(e, Exception):
+                setattr(e, "teardown_facts", {
+                    "remote_dir": session.remote_dir,
+                    "remote_ownership": session.ownership,
+                    "cleanup_ok": removal_ok,
+                    "cleanup_detail": removal_detail,
+                    "cleanup_interrupted": removal_interrupted,
+                    "interrupted_stage": ("directory-removal" if removal_interrupted
+                                          else "master-exit"),
+                })
+            raise
         if err is not None:
             raise err
 
@@ -1332,19 +1451,27 @@ class SSHTransport:
         as ``lifecycle_error`` (with the precise ``master_shutdown`` result) so the
         collector can persist it durably and reflect it in the exit status. A run that
         cannot confirm it stopped an authenticated master must not look successful.
+
+        A cancellation that arrived during the shutdown is re-raised LAST: after the
+        verdict is recorded and after the local resources are released, so it can
+        neither be swallowed nor skip either of them.
         """
+        interrupt = None
         try:
-            result = self._exit_master()
+            result, interrupt = self._shutdown_master()
             self.master_shutdown = result
             if result == MS_GONE:
                 self.log("ssh control master exited (shutdown verified)")
             elif shutdown_is_unconfirmed(result):
                 self.lifecycle_error = (
                     "ssh control master shutdown is NOT confirmed (%s); an authenticated "
-                    "master process may still be running until its ControlPersist idle "
-                    "timeout. No process was signalled." % result)
+                    "master process may still be running. ControlPersist is an IDLE "
+                    "timeout, not a deadline for a stuck or busy master. No process was "
+                    "signalled." % result)
                 self.log("WARNING: %s" % self.lifecycle_error)
             else:
                 self.log("no ssh control master to stop (no control socket and none up)")
         finally:
             self._release_master_resources()
+        if interrupt is not None:
+            raise interrupt
