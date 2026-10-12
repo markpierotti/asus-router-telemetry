@@ -70,19 +70,34 @@ def _pair(prev, cur):
     if dt <= 0:
         return {"state": "zero_elapsed", "util_percent": None,
                 "delta_total": dt, "delta_idle": di, "delta_iowait": diow}
-    util = 100.0 * (dt - di) / dt
+    # Ratio FIRST, then scale: `100.0 * (dt - di)` would convert the (possibly
+    # very large) integer delta to a C double and raise OverflowError for a
+    # value beyond float range. `(dt - di) / dt` is a ratio in [0, 1] that true
+    # division evaluates safely even for arbitrary-precision ints.
+    util = 100.0 * ((dt - di) / dt)
     util = max(0.0, min(100.0, util))      # clamp against a partial reset
     return {"state": "ok", "util_percent": round(util, 2),
             "delta_total": dt, "delta_idle": di, "delta_iowait": diow}
 
 
 def detect_reboot(prev_doc, cur_doc):
-    """True when the host uptime moved backwards between two samples."""
+    """True when the host uptime moved backwards between two samples.
+
+    The comparison is written so it stays safe for arbitrary-size integers: a
+    subtraction involving a float operand (``pu - 1.0`` or ``pu - cu`` when ``cu``
+    is a float) would coerce ``pu`` to a C double and raise OverflowError for a
+    huge int. Integer-vs-float COMPARISON never coerces, so the float case is
+    phrased as ``cu + 1.0 < pu`` and the integer case keeps an integer subtraction.
+    """
     pu = (prev_doc or {}).get("host", {}).get("uptime_seconds")
     cu = (cur_doc or {}).get("host", {}).get("uptime_seconds")
     if pu is None or cu is None:
         return False
-    return cu < pu - 1.0
+    if cu >= pu:
+        return False
+    if isinstance(pu, float) or isinstance(cu, float):
+        return cu + 1.0 < pu
+    return (pu - cu) > 1.0
 
 
 def compare(prev_stat, cur_stat, *, reboot=False, interval_seconds=None):

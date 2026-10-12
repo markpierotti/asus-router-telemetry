@@ -13,8 +13,14 @@ unbounded / deeply nested device output):
   * a nesting budget, scanned over the raw text in a string- and escape-aware way,
     so a small but deeply nested document cannot reach the interpreter recursion
     limit; and
-  * rejection of the non-standard JSON constants NaN / Infinity / -Infinity, and
-    conversion of Python's RecursionError into MalformedData, so a bad response is
+  * rejection of EVERY non-finite number, however it is expressed: the literal
+    constants NaN / Infinity / -Infinity (the ``parse_constant`` hook) AND a
+    numeric literal that overflows to a non-finite double such as ``1e999`` (the
+    ``parse_float`` hook). ``json`` only routes the LITERAL tokens through
+    ``parse_constant``; an overflowing exponent is produced by the number parser,
+    so without the second hook a non-finite value could enter an extra/unknown
+    field and later be re-emitted as the non-standard token ``Infinity``.
+  * conversion of Python's RecursionError into MalformedData, so a bad response is
     recorded as a failed attempt and the loop can accept the next good sample.
 
 validate() is deliberately strict about the fields the collector consumes and
@@ -22,6 +28,13 @@ permissive about extra fields, so the reporter can grow without breaking the
 collector. Numeric fields must be FINITE and, where a range is defined, within it;
 booleans are never accepted where a number is required, and legitimate null /
 unavailable measurements are preserved.
+
+Numeric limits (see the constants below) are derived from the reporter's actual
+field types, so anything the reporter CANNOT emit is rejected as schema_invalid
+through the ordinary classifier — never by letting a numeric check raise. The
+predicates are safe for ARBITRARY JSON integers: ``math.isfinite`` converts its
+argument to a C double and raises ``OverflowError`` on an int such as ``10**400``
+(which JSON can express as a plain integer), so only floats are passed to it.
 """
 
 import json
@@ -34,6 +47,22 @@ SCHEMA = "router_health/2"
 # Containment budgets. parse() also takes explicit per-call overrides.
 MAX_DOC_BYTES = 1024 * 1024     # 1 MiB: far above any legitimate reporter document
 MAX_NESTING = 64                # the real document nests about five levels deep
+
+# Numeric limits, derived from what the reporter can actually emit
+# (src/router_health.c):
+#   * byte / kB / jiffy counters are C ``unsigned long long`` (64-bit), so
+#     0..2**64-1 is the widest legitimate integer; ``cpu.count``, the process
+#     counts and the storage counts are narrower but 64-bit is a safe ceiling.
+#   * ``host.uptime_seconds`` is a double, and the reporter itself treats any
+#     value >= 1e12 (or negative) as unreadable and emits null — so nothing at or
+#     above that bound is legitimate.
+#   * ``loadavg.*`` are doubles with no kernel bound, but a router load never
+#     approaches 1e9 runnable tasks; a value that large is corruption.
+# A number outside its field's range is rejected as schema_invalid through the
+# ordinary classifier, never by letting a numeric check raise.
+INT_LIMIT = 2 ** 64 - 1
+MAX_UPTIME_SECONDS = 1e12
+MAX_LOAD = 1e9
 
 CPU_FIELDS = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal")
 MEM_KEYS = ("MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SwapTotal", "SwapFree")
@@ -48,15 +77,36 @@ def _is_num(x):
 
 
 def _is_finite_num(x):
-    return _is_num(x) and math.isfinite(x)
+    """True for any finite real number, INCLUDING arbitrary-precision ints.
+
+    ``math.isfinite`` converts its argument to a C double, so calling it on a
+    large Python int (e.g. ``10**400``, expressible as a plain JSON integer)
+    raises ``OverflowError`` instead of returning False. A Python int is ALWAYS
+    finite, so only floats are handed to ``math.isfinite``.
+    """
+    if not _is_num(x):
+        return False
+    if isinstance(x, float):
+        return math.isfinite(x)
+    return True
 
 
-def _is_nonneg_num(x):
-    return _is_finite_num(x) and x >= 0
+def _is_uptime(x):
+    # uptime_seconds is a double; the reporter treats >= 1e12 (or negative) as
+    # unreadable and emits null, so nothing larger is a legitimate value. The
+    # comparison is done against the int/float directly (never a float cast), so
+    # an arbitrary-size integer is simply out of range, not an OverflowError.
+    return _is_finite_num(x) and 0.0 <= x < MAX_UPTIME_SECONDS
+
+
+def _is_load(x):
+    # loadavg fields are doubles; a router load never approaches 1e9 runnable
+    # tasks, so anything at/above that is rejected rather than fed to derivation.
+    return _is_finite_num(x) and 0.0 <= x < MAX_LOAD
 
 
 def _is_nonneg_int(x):
-    return _is_int(x) and x >= 0
+    return _is_int(x) and 0 <= x <= INT_LIMIT
 
 
 def _fail(path, msg):
@@ -81,6 +131,22 @@ def _opt_nullable(doc, key, path, pred, what):
 def _reject_constant(name):
     """json.loads parse_constant hook: refuse NaN / Infinity / -Infinity."""
     raise ValueError("non-standard JSON constant %r is not allowed" % name)
+
+
+def _reject_float(text):
+    """json.loads parse_float hook: refuse a float literal that overflows to a
+    non-finite double (e.g. ``1e999`` -> ``inf``).
+
+    ``parse_constant`` only sees the literal TOKENS NaN / Infinity / -Infinity; a
+    numeric literal that OVERFLOWS to infinity is produced by the number parser
+    instead, so it needs this hook. Without it, ``{"extra": 1e999}`` parses to an
+    ``inf`` hidden in an extra field and could later be re-serialised as the
+    non-standard token ``Infinity``.
+    """
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("non-finite JSON number %r is not allowed" % text)
+    return value
 
 
 def _check_nesting(text, max_depth):
@@ -131,7 +197,7 @@ def parse(raw, *, max_bytes=MAX_DOC_BYTES, max_nesting=MAX_NESTING):
                 "response is %d characters, over the %d-byte limit" % (len(text), max_bytes))
     _check_nesting(text, max_nesting)
     try:
-        doc = json.loads(text, parse_constant=_reject_constant)
+        doc = json.loads(text, parse_constant=_reject_constant, parse_float=_reject_float)
     except RecursionError as e:
         raise MalformedData("JSON is nested too deeply to decode: %s" % e)
     except ValueError as e:
@@ -154,7 +220,7 @@ def validate(doc):
     _req(host, "sysname", "host", str, "string")
     _req(host, "release", "host", str, "string")
     _req(host, "machine", "host", str, "string")
-    _opt_nullable(host, "uptime_seconds", "host", _is_nonneg_num, "finite non-negative number")
+    _opt_nullable(host, "uptime_seconds", "host", _is_uptime, "finite uptime in [0, 1e12) seconds")
 
     cpu = _req(doc, "cpu", "", dict, "object")
     if "count" not in cpu:
@@ -166,9 +232,9 @@ def validate(doc):
     for k in ("load1", "load5", "load15"):
         if k not in la:
             _fail("loadavg.%s" % k, "missing required field")
-        if not _is_nonneg_num(la[k]):
+        if not _is_load(la[k]):
             _fail("loadavg.%s" % k,
-                  "expected a finite non-negative number, got %r" % (la[k],))
+                  "expected a finite load in [0, 1e9), got %r" % (la[k],))
     for k in ("procs_running", "procs_total"):
         if k not in la:
             _fail("loadavg.%s" % k, "missing required field")

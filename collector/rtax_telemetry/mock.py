@@ -28,7 +28,7 @@ CPU_FIELDS = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "ste
 SCENARIOS = (
     "success", "malformed", "wrong_schema", "wrong_type", "timeout",
     "auth", "unreachable", "hostkey", "reporter_failure",
-    "reset", "reboot", "zero_elapsed", "nested",
+    "reset", "reboot", "zero_elapsed", "nested", "huge_number",
 )
 
 
@@ -89,6 +89,12 @@ class ScenarioTransport:
             # a small but deeply nested document: must be classified, not crash the
             # interpreter with RecursionError
             return b'{"extra":' + b'[' * 2000 + b'0' + b']' * 2000 + b'}'
+        if s == "huge_number":
+            # an integer too large to convert to a float: must be classified as
+            # schema_invalid, never crash a numeric check (OverflowError)
+            d = copy.deepcopy(self._base)
+            d["host"]["uptime_seconds"] = 10 ** 400
+            return json.dumps(d).encode()
         if s == "wrong_schema":
             d = copy.deepcopy(self._base)
             d["schema"] = "router_health/1"

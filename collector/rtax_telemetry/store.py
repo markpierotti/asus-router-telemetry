@@ -20,6 +20,12 @@ budget, so a write failure is explicit rather than a silent truncation.
 Temporary files use a unique suffix (pid + random), so two writers sharing a data
 directory cannot collide on a fixed ``*.tmp`` name and lose records.
 
+Every document written here — samples, the outcome log, state — is serialised as
+STRICT JSON (``allow_nan=False``): a non-finite float (``inf``/``nan``) raises
+instead of being written as the non-standard token ``Infinity``/``NaN``. Combined
+with the parser's rejection of non-finite input, a stored document is always
+valid, standard JSON.
+
 The raw artifact bytes are NEVER stored — only the reporter's JSON output.
 """
 
@@ -88,7 +94,8 @@ class Store:
     def save_sample(self, obj, *, when=None):
         self.ensure()
         ts = time_now() if when is None else when
-        payload = json.dumps(obj, separators=(",", ":"), sort_keys=False).encode("utf-8")
+        payload = json.dumps(obj, separators=(",", ":"), sort_keys=False,
+                             allow_nan=False).encode("utf-8")
         if len(payload) > self.max_sample_bytes:
             raise QuotaExceeded(
                 "sample is %d bytes, over the %d-byte per-write budget"
@@ -118,7 +125,7 @@ class Store:
     def append_outcome(self, rec):
         self.ensure()
         with open(self.outcomes_path, "a") as fh:
-            fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+            fh.write(json.dumps(rec, separators=(",", ":"), allow_nan=False) + "\n")
         self.prune_outcomes()
 
     def outcomes(self, limit=None):
@@ -152,7 +159,7 @@ class Store:
         self.ensure()
         tmp = self.state_path.with_suffix(".json.%s.tmp" % _tmp_suffix())
         with open(tmp, "w") as fh:
-            json.dump(state, fh, indent=2, sort_keys=True)
+            json.dump(state, fh, indent=2, sort_keys=True, allow_nan=False)
             fh.write("\n")
         os.replace(tmp, self.state_path)
 

@@ -379,8 +379,16 @@ def _drain_bounded(p, timeout, stdin_bytes, max_stdout, max_stderr):
     Nothing is fully buffered before the limits are checked: every read is counted
     and an over-limit stream raises OutputLimitExceeded immediately, so an
     authenticated-but-hostile endpoint cannot make the host allocate without bound.
-    stdin (the artifact) is written concurrently, so neither direction can deadlock
-    the other.
+
+    stdin (the artifact) is written CONCURRENTLY *and NON-BLOCKING*. Selector
+    readiness only means SOME bytes can be written — never that a whole chunk
+    fits — so a plain blocking ``os.write`` could stall past the deadline while a
+    slow (or partial) reader keeps the pipe full. The write end is therefore
+    switched to non-blocking: a partial write advances ``pos``, EAGAIN
+    (``BlockingIOError``) simply leaves stdin registered so the outputs keep being
+    drained and the deadline keeps being checked, and a broken pipe (the child
+    closed its stdin) is treated as "input finished". An empty input is closed off
+    immediately so the child still sees EOF.
     """
     sel = selectors.DefaultSelector()
     out = bytearray()
@@ -394,7 +402,12 @@ def _drain_bounded(p, timeout, stdin_bytes, max_stdout, max_stderr):
         if p.stderr is not None:
             sel.register(p.stderr, selectors.EVENT_READ, "err")
         if view is not None and p.stdin is not None:
-            sel.register(p.stdin, selectors.EVENT_WRITE, "in")
+            # Non-blocking write end: readiness is not a promise the chunk fits.
+            os.set_blocking(p.stdin.fileno(), False)
+            if len(view) == 0:
+                _close_registered(sel, p.stdin)        # empty input -> immediate EOF
+            else:
+                sel.register(p.stdin, selectors.EVENT_WRITE, "in")
         while sel.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -407,7 +420,12 @@ def _drain_bounded(p, timeout, stdin_bytes, max_stdout, max_stderr):
                         continue
                     try:
                         n = os.write(stream.fileno(), view[pos:pos + _READ_CHUNK])
+                    except BlockingIOError:
+                        # pipe buffer full: keep it registered and loop; stdout/
+                        # stderr are still drained and the deadline is still checked
+                        continue
                     except BrokenPipeError:
+                        # the child closed its stdin: input is finished
                         n = len(view) - pos
                     pos += n
                     if pos >= len(view):
