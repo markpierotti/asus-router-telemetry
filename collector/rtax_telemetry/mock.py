@@ -103,6 +103,16 @@ class ScenarioTransport:
             e = ProvisioningError(
                 "provisioning step 'exclusive mkdir' failed: remote command exceeded "
                 "its bound (mock)")
+            # Same shape as the real transport: one dict so the PRESENCE of the facts
+            # is unambiguous, plus the historic individual attributes.
+            setattr(e, "provision_facts", {
+                "remote_dir": "/tmp/rt.mockprov",
+                "remote_ownership": "unknown",
+                "cleanup_ok": False,
+                "cleanup_detail": (
+                    "remote dir /tmp/rt.mockprov may exist but its creation was never "
+                    "acknowledged (ownership=unknown) (mock)"),
+            })
             setattr(e, "remote_dir", "/tmp/rt.mockprov")
             setattr(e, "remote_ownership", "unknown")
             setattr(e, "provision_cleanup_ok", False)

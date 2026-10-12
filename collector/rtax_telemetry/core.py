@@ -179,6 +179,8 @@ class Collector:
         self._session = None
         self._last_session = None       # kept so a teardown failure can name its path
         self.cleanup_error = None       # set when a teardown fails; surfaced by the CLI
+        self.cleanup_interrupted = False  # teardown was cancelled; removal UNCONFIRMED
+        self.lifecycle_error = None     # master shutdown could not be confirmed
         self.persistence_error = None   # set when evidence could NOT be written
 
     # ------------------------------------------------------------- sessions
@@ -194,43 +196,92 @@ class Collector:
         self._last_session = session
         try:
             self.transport.stop(session)
-        except Exception as e:                      # noqa: BLE001
-            self.cleanup_error = sanitize_detail(e)
+        except BaseException as e:                  # noqa: BLE001 - see below
+            # `Exception` alone is not enough here. A CANCELLATION (KeyboardInterrupt
+            # from Ctrl-C/SIGTERM/SIGHUP) or any other BaseException raised while
+            # tearing down means the remote directory may still exist, and that has to
+            # be recorded before the cancellation is re-propagated. Swallowing the
+            # cancellation would lose the operator's intent; not recording it would
+            # lose the cleanup uncertainty.
+            #
+            # An ordinary Exception (a failed removal, an unreachable device) is a
+            # teardown FAILURE: it is recorded and the run continues to its normal
+            # classification. Only a cancellation-class BaseException is re-raised.
+            self.cleanup_error = sanitize_detail(
+                e if isinstance(e, Exception) else
+                ("teardown was INTERRUPTED by %s; removal of the remote directory is "
+                 "UNCONFIRMED" % type(e).__name__))
+            if not isinstance(e, Exception):
+                self.cleanup_interrupted = True
             self.log("cleanup: %s" % self.cleanup_error)
+            if not isinstance(e, Exception):
+                raise
+        finally:
+            self._capture_transport_lifecycle()
+
+    def _capture_transport_lifecycle(self):
+        """Lift the transport's master-shutdown verdict into the collector.
+
+        Called even when teardown raised, so an interrupted teardown still records
+        what happened to the control master.
+        """
+        err = getattr(self.transport, "lifecycle_error", None)
+        if err:
+            self.lifecycle_error = sanitize_detail(err)
+            self.log("master shutdown: %s" % self.lifecycle_error)
 
     def close(self):
-        self._drop_session()
-        if self.cleanup_error:
-            self._note_cleanup_failure()
+        """Tear down and persist whatever could not be confirmed.
 
-    def _note_cleanup_failure(self):
-        """Persist a teardown failure DURABLY, in three places.
+        The teardown record is written from a ``finally``, so it is written even when
+        ``_drop_session`` re-raises a cancellation. Nothing here turns a cancellation
+        or an unconfirmed teardown into success.
+        """
+        try:
+            self._drop_session()
+        finally:
+            if self.cleanup_error or self.lifecycle_error:
+                self._note_teardown_failure()
+
+    def _note_teardown_failure(self):
+        """Persist anything the teardown could NOT confirm — durably, in three places.
 
         A state patch alone is not durable evidence: the next attempt overwrites
         ``last_attempt``, so a SHUTDOWN cleanup failure could disappear from history
         entirely. The failure is therefore also appended to the append-only outcome
-        log as an explicit ``teardown`` record, and the exact remote path is written
-        to ``pending_cleanup.jsonl`` so a later read-only reconciliation can find it.
+        log as an explicit ``teardown`` record, and — when a REMOTE DIRECTORY's
+        removal is the thing that is unconfirmed — the exact path is written to
+        ``pending_cleanup.jsonl`` so a later read-only reconciliation can find it.
+
+        A master-shutdown failure alone does NOT create a pending-directory entry: the
+        directory may be gone and what is unconfirmed is the *master*, so naming a
+        directory for deletion would be wrong. It is recorded in the teardown record
+        and the state instead.
 
         If any of those writes fails, the failure is REPORTED (``persistence_error``)
         rather than the record being assumed durable.
         """
-        detail = self.cleanup_error
         session = self._last_session
         remote_dir = getattr(session, "remote_dir", None)
         ownership = getattr(session, "ownership", "unknown")
         at = utc_iso(self.clock())
         problems = []
+        cleanup_detail = self.cleanup_error
+        lifecycle_detail = self.lifecycle_error
+        master_shutdown = getattr(self.transport, "master_shutdown", None)
 
         try:
             self.store.append_outcome({
                 "record": "teardown",
                 "at": at,
-                "outcome": "cleanup_failure",
+                "outcome": "cleanup_failure" if cleanup_detail else "lifecycle_failure",
                 "remote_dir": remote_dir,
                 "remote_ownership": ownership,
                 "cleanup_ok": False,
-                "cleanup_detail": detail,
+                "cleanup_detail": cleanup_detail,
+                "cleanup_interrupted": bool(self.cleanup_interrupted),
+                "master_shutdown": master_shutdown,
+                "lifecycle_error": lifecycle_detail,
             })
         except Exception as e:                      # noqa: BLE001
             problems.append("teardown record not persisted (%s)" % e)
@@ -240,14 +291,18 @@ class Collector:
             la = state.get("last_attempt") if isinstance(state, dict) else None
             if isinstance(la, dict):
                 la["cleanup_ok"] = False
-                la["cleanup_detail"] = detail
+                la["cleanup_detail"] = cleanup_detail or lifecycle_detail
+                if lifecycle_detail:
+                    la["master_shutdown"] = master_shutdown
+                    la["lifecycle_error"] = lifecycle_detail
                 self.store.write_state(state)
             else:
                 problems.append("no last attempt in state to annotate")
         except Exception as e:                      # noqa: BLE001
             problems.append("state not updated (%s)" % e)
 
-        self._record_pending_cleanup(remote_dir, ownership, detail)
+        if cleanup_detail:
+            self._record_pending_cleanup(remote_dir, ownership, cleanup_detail)
 
         if problems:
             merged = "; ".join(problems)
@@ -268,7 +323,9 @@ class Collector:
         ownership = "none"
         provision_cleanup_ok = None
         provision_cleanup_detail = None
+        caught = None
         self.cleanup_error = None       # per-attempt: reset so it reflects THIS attempt
+        self.cleanup_interrupted = False
 
         try:
             session = self._ensure_session()
@@ -294,12 +351,10 @@ class Collector:
         except SchemaInvalid as e:
             outcome, detail = OUTCOME_SCHEMA, str(e)
         except ProvisioningError as e:
-            outcome, detail = OUTCOME_PROVISION, str(e)
-            (remote_dir, ownership,
-             provision_cleanup_ok, provision_cleanup_detail) = self._provision_facts(e)
+            outcome, detail, caught = OUTCOME_PROVISION, str(e), e
             self._drop_session()
         except ControlMasterLost as e:
-            outcome, detail = OUTCOME_MASTER_LOST, str(e)
+            outcome, detail, caught = OUTCOME_MASTER_LOST, str(e), e
             self._drop_session()
         except TransportAuthError as e:
             outcome, detail = OUTCOME_AUTH, str(e)
@@ -315,24 +370,24 @@ class Collector:
             outcome, detail = OUTCOME_TIMEOUT, str(e)
             self._drop_session()
         except RemoteCommandError as e:
-            outcome, detail = OUTCOME_REPORTER_FAILURE, str(e)
+            outcome, detail, caught = OUTCOME_REPORTER_FAILURE, str(e), e
             self._drop_session()
         except ArtifactMismatch as e:
-            outcome, detail = OUTCOME_ARTIFACT, str(e)
+            outcome, detail, caught = OUTCOME_ARTIFACT, str(e), e
             self._drop_session()
         except OutputLimitExceeded as e:
             # the device sent more output than the byte budget allows: a classified
             # collection failure, not an unbounded buffer
-            outcome, detail = OUTCOME_OVERFLOW, str(e)
+            outcome, detail, caught = OUTCOME_OVERFLOW, str(e), e
             self._drop_session()
         except QuotaExceeded as e:
             # local storage refused the write; the reporter itself was fine, so the
             # session is kept for the next attempt
             outcome, detail = OUTCOME_STORAGE, str(e)
         except StorageError as e:
-            outcome, detail = OUTCOME_STORAGE, str(e)
+            outcome, detail, caught = OUTCOME_STORAGE, str(e), e
         except TransportError as e:
-            outcome, detail = OUTCOME_TRANSPORT, str(e)
+            outcome, detail, caught = OUTCOME_TRANSPORT, str(e), e
             self._drop_session()
         except TelemetryError as e:
             outcome, detail = OUTCOME_TRANSPORT, str(e)
@@ -345,7 +400,25 @@ class Collector:
             # escaping as an unclassified crash that loses it.
             outcome = OUTCOME_INTERNAL
             detail = "%s: %s" % (type(e).__name__, e)
+            caught = e
             self._drop_session()
+
+        # PROVISIONING FACTS ARE FOLDED IN FOR EVERY CLASSIFICATION, not only for
+        # ProvisioningError. The transport attaches them to whichever exception ended
+        # the provisioning phase — ControlMasterLost, ArtifactMismatch,
+        # OutputLimitExceeded, StorageError, an internal error — and dropping them would
+        # record `cleanup_ok: true` and lose the exact path of a directory that may
+        # still exist on the router. The OUTCOME CLASS is untouched: only the
+        # cleanup/ownership evidence is taken from the exception.
+        if caught is not None:
+            rd, own, ok, det = self._provision_facts(caught)
+            if rd:
+                remote_dir = rd
+            if own is not None:
+                ownership = own
+            if ok is False:
+                provision_cleanup_ok = False
+                provision_cleanup_detail = det
 
         duration = round(self.monotonic() - m0, 3)
         cleanup_ok = self.cleanup_error is None
@@ -380,14 +453,31 @@ class Collector:
         """Facts about a FAILED PROVISION, taken from the exception the transport raised.
 
         The transport attaches these because a failed provision is exactly when a
-        remote directory is most likely to be left behind. When they are absent the
-        ownership is reported as ``none`` and no cleanup claim is made — never as a
-        silent `cleanup_ok: true`.
+        remote directory is most likely to be left behind. The single
+        ``provision_facts`` dict is preferred so that the PRESENCE of the facts is
+        unambiguous; the individual attributes are still honoured for test doubles
+        written against the earlier shape. When neither is present the ownership is
+        reported as ``none`` and no cleanup claim is made — never a silent
+        ``cleanup_ok: true``.
         """
-        return (getattr(e, "remote_dir", None),
-                getattr(e, "remote_ownership", "none"),
-                getattr(e, "provision_cleanup_ok", None),
-                getattr(e, "provision_cleanup_detail", None))
+        facts = getattr(e, "provision_facts", None)
+        if isinstance(facts, dict):
+            # authoritative when present: `remote_ownership` may legitimately be
+            # "none" here, and that IS the recorded fact
+            return (facts.get("remote_dir"),
+                    facts.get("remote_ownership"),
+                    facts.get("cleanup_ok"),
+                    facts.get("cleanup_detail"))
+        if hasattr(e, "provision_cleanup_ok") or hasattr(e, "remote_ownership"):
+            return (getattr(e, "remote_dir", None),
+                    getattr(e, "remote_ownership", None),
+                    getattr(e, "provision_cleanup_ok", None),
+                    getattr(e, "provision_cleanup_detail", None))
+        # NO facts at all (an exception raised after a successful provision, e.g. a
+        # master lost mid-collection). Returning a default "none" here would OVERWRITE
+        # the ownership the live session already reported, so the absence is returned
+        # as None and the caller keeps what it has.
+        return (None, None, None, None)
 
     def _record_pending_cleanup(self, remote_dir, ownership, detail):
         """Durably record a remote directory whose removal is NOT confirmed.

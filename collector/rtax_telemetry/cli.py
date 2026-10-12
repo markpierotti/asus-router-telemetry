@@ -313,12 +313,40 @@ def cmd_collect(args):
         log("interrupted: stopping cleanly")
         rc = EXIT_INTERRUPTED
     finally:
-        restore_stop_handlers(installed)
-        collector.close()
-        release_lock()          # scoped release: always drop the data-dir lock
+        # ---- teardown -------------------------------------------------------
+        # The stop handlers stay INSTALLED through the teardown, so a second signal
+        # during cleanup lands in the same orderly path instead of killing the
+        # process mid-teardown. `collector.close()` records whatever the teardown
+        # could not confirm (durably) BEFORE it re-raises, the nested finally
+        # guarantees the lock is released regardless, and a cancellation during
+        # teardown is neither swallowed nor turned into success.
+        try:
+            collector.close()
+        except KeyboardInterrupt:
+            log("teardown was interrupted; cleanup is recorded as UNCERTAIN")
+            if rc == EXIT_OK:
+                rc = EXIT_INTERRUPTED
+        except BaseException as e:                      # noqa: BLE001
+            log("teardown raised %s; cleanup is recorded as UNCERTAIN"
+                % type(e).__name__)
+            if rc == EXIT_OK:
+                rc = EXIT_CLEANUP_FAILURE
+        finally:
+            # scoped release. This MUST be its own finally rather than a statement
+            # later in a shared block: that is what leaked the data-dir lock when
+            # teardown raised.
+            release_lock()
+            restore_stop_handlers(installed)
     # A cleanup failure is surfaced separately and never masks an original failure.
     if collector.cleanup_error:
         log("cleanup: SEPARATE FAILURE: %s" % collector.cleanup_error)
+        if rc == EXIT_OK:
+            rc = EXIT_CLEANUP_FAILURE
+    # An UNCONFIRMED control-master shutdown is also surfaced, and also does not mask
+    # the original collection failure: the run reports its own outcome AND the fact
+    # that an authenticated master may still be running.
+    if collector.lifecycle_error:
+        log("master shutdown: SEPARATE FAILURE: %s" % collector.lifecycle_error)
         if rc == EXIT_OK:
             rc = EXIT_CLEANUP_FAILURE
     # ... and so is a failure to WRITE the evidence. Never report success when the

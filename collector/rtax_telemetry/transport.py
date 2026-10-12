@@ -109,6 +109,23 @@ _MASTER_CHECK_BOUND = 10
 # loop interval at or above it (the master would idle-expire between attempts).
 DEFAULT_CONTROL_PERSIST = 900
 
+# --- master-shutdown outcome vocabulary -------------------------------------
+# A shutdown is only "confirmed" by a POSITIVE follow-up observation. The other
+# results are kept distinct because they mean different things: an absent socket is
+# not the same fact as a probe that timed out, and neither proves that a detached
+# master process has exited.
+MS_NOT_ATTEMPTED = "no-master"                    # nothing was up and no socket existed
+MS_GONE = "shutdown-verified"                     # the follow-up probe says it is gone
+MS_STILL_ANSWERING = "shutdown-unconfirmed: master still answers the probe"
+MS_PROBE_TIMEOUT = "shutdown-unconfirmed: the follow-up probe timed out"
+MS_EXIT_FAILED = "shutdown-unconfirmed: the -O exit command did not complete"
+
+_UNCONFIRMED_SHUTDOWNS = (MS_STILL_ANSWERING, MS_PROBE_TIMEOUT, MS_EXIT_FAILED)
+
+
+def shutdown_is_unconfirmed(result):
+    return result in _UNCONFIRMED_SHUTDOWNS
+
 # Byte ceilings for device output. Enforced WHILE RECEIVING (before any full
 # buffering), so an authenticated-but-hostile endpoint cannot exhaust host memory.
 DEFAULT_MAX_STDOUT = 1024 * 1024        # 1 MiB
@@ -716,6 +733,11 @@ class SSHTransport:
         self._ctrl_path = None
         self._master_up = False
         self._master_pid = None
+        # Lifecycle facts for the collector: the precise master-shutdown result and,
+        # when it is not confirmed, the reason. Recorded evidence only — nothing is
+        # signalled from `_master_pid`.
+        self.master_shutdown = None
+        self.lifecycle_error = None
 
     # ------------------------------------------------------------- options
     def _ssh_opts(self):
@@ -801,14 +823,25 @@ class SSHTransport:
     def _master_check(self):
         """Ask OpenSSH itself whether the control master is alive.
 
-        Returns ``(alive, pid)``. ``-O check`` prints ``Master running (pid=NNNN)``
-        and exits 0 when the master answers, and exits non-zero when the control
-        socket is absent or dead. ``pid`` is the master's PID when ssh reported it,
-        else None. This is the authoritative liveness probe; ``_master_up`` alone is
-        only a record of what happened at establishment time.
+        Returns ``(alive, pid, probe_failed)``. ``-O check`` exits 0 when the master
+        answers and non-zero when the control socket is absent or dead. This is the
+        authoritative liveness probe; ``_master_up`` alone only records what happened
+        at establishment time.
+
+        ``probe_failed`` is True when the PROBE itself could not be completed (a local
+        deadline or an ssh binary that would not run). It is deliberately separate
+        from ``alive=False``: a probe we could not run says the master's state is
+        UNKNOWN, which must not be reported as "confirmed gone".
+
+        The diagnostic is searched in **stderr as well as stdout**, and the CRLF form
+        is tolerated. Real OpenSSH writes the success message with
+        ``fprintf(stderr, "Master running (pid=%d)\\r\\n", ...)`` — independently
+        verified by a follow-up review against `/usr/bin/ssh` on macOS — so parsing
+        stdout alone finds `(True, None)`. The PID is used ONLY as recorded evidence:
+        nothing is ever signalled from it (see ``_exit_master``).
         """
         if not self._ctrl_path:
-            return False, None
+            return False, None, False
         argv = [self.ssh_bin] + self._ssh_opts() + [
             "-o", "BatchMode=yes",
             "-o", "ControlPath=%s" % self._ctrl_path,
@@ -817,12 +850,15 @@ class SSHTransport:
         try:
             rc, out, err = run_bounded(argv, _MASTER_CHECK_BOUND, env=_child_env(),
                                        max_stdout=4096, max_stderr=4096)
-        except (RemoteTimeout, OSError):
-            return False, None
+        except RemoteTimeout:
+            return False, None, True
+        except OSError:
+            return False, None, True
         if rc != 0:
-            return False, None
-        m = re.search(r"pid=(\d{1,10})", out.decode("utf-8", "replace"))
-        return True, (int(m.group(1)) if m else None)
+            return False, None, False
+        combined = (out or b"") + b"\n" + (err or b"")
+        m = re.search(rb"pid=(\d{1,10})", combined)
+        return True, (int(m.group(1)) if m else None), False
 
     def _require_master(self):
         """Refuse a multiplexed command unless the master is PROVEN alive.
@@ -838,61 +874,50 @@ class SSHTransport:
             raise ControlMasterLost(
                 "ssh control master is not up; refusing to start a multiplexed command "
                 "(a fresh connection would need interactive authentication)")
-        alive, pid = self._master_check()
+        alive, pid, probe_failed = self._master_check()
         if not alive:
             self._master_up = False
             self._master_pid = None
+            if probe_failed:
+                raise ControlMasterLost(
+                    "the ssh control-master probe could not be completed (control socket "
+                    "%s); the master's state is UNKNOWN, so no multiplexed command is "
+                    "started and no fresh connection is made" % self._ctrl_path)
             raise ControlMasterLost(
                 "ssh control master has gone away (control socket %s no longer answers); "
                 "refusing to fall back to a fresh connection" % self._ctrl_path)
         if pid and pid > 0:
             self._master_pid = pid
 
-    def _kill_master_pid(self):
-        """Last resort: signal ONLY the PID OpenSSH itself reported for the master.
-
-        Never a pattern, a prefix or a process-group sweep — one PID, verified to
-        have exited between attempts. Returns a short human description.
-        """
-        pid = self._master_pid
-        if not pid or pid <= 0:
-            return "no master pid was reported by ssh; nothing was killed"
-        if pid == os.getpid():
-            return "refusing to signal our own pid"
-        for sig, wait in ((signal.SIGTERM, 2.0), (signal.SIGKILL, 2.0)):
-            try:
-                os.kill(pid, sig)
-            except ProcessLookupError:
-                return "master pid %d had already exited" % pid
-            except OSError as e:
-                return "could not signal master pid %d (%s)" % (pid, e)
-            deadline = time.monotonic() + wait
-            while time.monotonic() < deadline:
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    return "master pid %d exited after %s" % (
-                        pid, signal.Signals(sig).name)
-                except OSError:
-                    break
-                time.sleep(0.05)
-        return "master pid %d survived SIGKILL" % pid
-
     def _exit_master(self, verify=True):
         """Ask the master to exit, then VERIFY it is gone.
 
-        Returns True (confirmed gone), False (it still answers) or None (no master
-        was known to be up and no control socket existed, so there was nothing to
-        stop). Shutdown is never inferred from the ABSENCE of an error: success is
-        the positive result of the follow-up ``-O check``.
+        Returns one of the ``MS_*`` results, distinguishing a confirmed exit from a
+        master that still answers, a probe that timed out, an ``-O exit`` that did not
+        complete, and the case where there was no master and no socket at all.
+
+        Shutdown is never inferred from the ABSENCE of an error: success is the
+        positive result of the follow-up ``-O check``.
+
+        NO PROCESS IS SIGNALLED HERE. An earlier revision killed "the PID OpenSSH
+        reported", which is unsafe: a cached PID can be reused by an unrelated
+        process, and a PID alone carries no executable, owner or start-identity
+        evidence. A follow-up review showed the cached PID would be signalled
+        immediately and without any identity check, so the fallback was removed rather
+        than hardened. The consequence is recorded instead: an unconfirmed shutdown
+        becomes ``lifecycle_error`` on the transport, which the collector persists and
+        reflects in the exit status. A master that genuinely will not exit therefore
+        lingers until its ``ControlPersist`` idle timeout — a resource cost that is
+        reported, not a wrong process that is killed.
         """
         if not self._ctrl_path:
-            return None
+            return MS_NOT_ATTEMPTED
         known_up = self._master_up
         socket_present = os.path.exists(self._ctrl_path)
         self._master_up = False
         if not (known_up or socket_present):
-            return None
+            return MS_NOT_ATTEMPTED
+        exit_failed = False
         try:
             rc, _out, err = run_bounded(
                 [self.ssh_bin] + self._ssh_opts() + [
@@ -901,18 +926,21 @@ class SSHTransport:
                     "-O", "exit", self._target()],
                 15, env=_child_env(), max_stdout=4096, max_stderr=4096)
             if rc != 0:
+                exit_failed = True
                 self.log("ssh -O exit returned %d: %s" % (rc, _oneline(err)))
         except BaseException as e:                           # noqa: BLE001 - best effort
+            exit_failed = True
             self.log("ssh -O exit did not complete: %s" % sanitize_detail(e))
         if not verify:
-            return None
-        alive, _pid = self._master_check()
+            return MS_NOT_ATTEMPTED
+        alive, pid, probe_failed = self._master_check()
+        self._master_pid = pid if (pid and pid > 0) else self._master_pid
+        if probe_failed:
+            return MS_PROBE_TIMEOUT
         if not alive:
-            return True
-        self.log("ssh master still answered after -O exit; killing the reported pid")
-        self.log(self._kill_master_pid())
-        alive, _pid = self._master_check()
-        return not alive
+            return MS_GONE
+        # The socket still answers. That is a positive observation, not an inference.
+        return MS_STILL_ANSWERING if not exit_failed else MS_EXIT_FAILED
 
     def _start_master(self):
         try:
@@ -964,12 +992,13 @@ class SSHTransport:
                 raise KeyboardInterrupt
             raise classify_ssh_failure(err.decode("utf-8", "replace"))
         self._master_up = True
-        alive, pid = self._master_check()
+        alive, pid, probe_failed = self._master_check()
         if not alive:
             self._master_up = False
             raise ControlMasterLost(
                 "ssh reported a successful master start but the control socket does "
-                "not answer - refusing to continue")
+                "not answer%s - refusing to continue"
+                % (" (probe could not be completed)" if probe_failed else ""))
         self._master_pid = pid if (pid and pid > 0) else None
         self.log("ssh master established to %s" % self._target())
 
@@ -1040,6 +1069,20 @@ class SSHTransport:
             # provision is exactly when a remote directory is most likely to be left
             # behind, and the attempt record must say so rather than defaulting to
             # cleanup_ok=true.
+            #
+            # The facts are attached as ONE dict so their PRESENCE is unambiguous, and
+            # they are attached whatever the exception CLASS: ControlMasterLost,
+            # ArtifactMismatch, OutputLimitExceeded, StorageError and any transport
+            # error that ended the provisioning phase all get them. The individual
+            # attributes are kept too, for callers and test doubles written against the
+            # earlier shape.
+            facts = {
+                "remote_dir": session.remote_dir,
+                "remote_ownership": session.ownership,
+                "cleanup_ok": cleanup_ok,
+                "cleanup_detail": cleanup_detail,
+            }
+            setattr(e, "provision_facts", facts)
             setattr(e, "remote_dir", session.remote_dir)
             setattr(e, "remote_ownership", session.ownership)
             setattr(e, "provision_cleanup_ok", cleanup_ok)
@@ -1283,13 +1326,25 @@ class SSHTransport:
             raise err
 
     def close(self):
-        """Stop the control master (verified) and release the local socket dir."""
+        """Stop the control master (verified) and release the local socket dir.
+
+        An UNCONFIRMED shutdown is not merely logged: it is recorded on the transport
+        as ``lifecycle_error`` (with the precise ``master_shutdown`` result) so the
+        collector can persist it durably and reflect it in the exit status. A run that
+        cannot confirm it stopped an authenticated master must not look successful.
+        """
         try:
             result = self._exit_master()
-            if result is False:
-                self.log("WARNING: the ssh control master still answered after -O exit; "
-                         "shutdown is NOT confirmed")
-            elif result is True:
+            self.master_shutdown = result
+            if result == MS_GONE:
                 self.log("ssh control master exited (shutdown verified)")
+            elif shutdown_is_unconfirmed(result):
+                self.lifecycle_error = (
+                    "ssh control master shutdown is NOT confirmed (%s); an authenticated "
+                    "master process may still be running until its ControlPersist idle "
+                    "timeout. No process was signalled." % result)
+                self.log("WARNING: %s" % self.lifecycle_error)
+            else:
+                self.log("no ssh control master to stop (no control socket and none up)")
         finally:
             self._release_master_resources()
