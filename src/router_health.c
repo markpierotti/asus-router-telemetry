@@ -28,19 +28,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <signal.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <math.h>
 
 #define TOOL_NAME    "router_health"
-#define TOOL_VERSION "1.0.3"
+#define TOOL_VERSION "1.0.4"
 #define SCHEMA       "router_health/2"
 
 /* Hard bounds. Each exists so that a pathological /proc file cannot make the tool
-   allocate without limit or emit a truncated (malformed) JSON document. */
+   allocate without limit or emit a truncated (malformed) JSON document.
+   TRUNCATION IS ALWAYS REPORTED: the document carries a "limits" block naming the
+   bound, how many mount records were SEEN, how many were skipped as overlong and
+   how many files were read partially, so a silently short answer cannot be mistaken
+   for a complete one. */
 #define SLURP_MAX      (4u * 1024u * 1024u)   /* max bytes read from any one file   */
 #define CPUSTAT_MAX    (64u * 1024u)          /* max serialised cpu_stat body size  */
 #define STATVFS_MAX_ENTRIES 512               /* max mounts considered              */
+
+/* Counts of files whose read hit SLURP_MAX. Reported in "limits". */
+static int g_files_truncated = 0;
 
 /* Test hook: --proc-root DIR re-points every /proc read at DIR. Read-only, no
    behaviour change when unset. Used by the fixture tests. */
@@ -55,8 +63,11 @@ static const char *pf(const char *name)
 
 /* ---------------------------------------------------------------- helpers */
 
-static char *slurp(const char *path)
+/* `truncated` (may be NULL) is set to 1 when the file was larger than SLURP_MAX and
+   the read stopped at the bound. */
+static char *slurp(const char *path, int *truncated)
 {
+    if (truncated) *truncated = 0;
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     size_t cap = 8192, len = 0;
@@ -66,7 +77,11 @@ static char *slurp(const char *path)
     while ((n = fread(buf + len, 1, cap - len - 1, f)) > 0) {
         len += n;
         if (len + 1 >= cap) {
-            if (cap >= SLURP_MAX) break;                 /* bounded: stop growing */
+            if (cap >= SLURP_MAX) {                      /* bounded: stop growing */
+                if (truncated) *truncated = 1;
+                g_files_truncated++;
+                break;
+            }
             size_t ncap = cap * 2;
             if (ncap > SLURP_MAX) ncap = SLURP_MAX;
             char *nb = realloc(buf, ncap);
@@ -162,18 +177,26 @@ static void json_escape(const char *src, char *dst, size_t dstsz)
     }
     dst[j] = '\0';
 }
-/* Decode the octal escapes /proc/mounts uses (space→\040, tab→\011, nl→\012, \→\134). */
+/* Decode the octal escapes /proc/mounts uses (space→\040, tab→\011, nl→\012, \→\134).
+
+   ONLY values 1..255 are decoded. A `\000` would embed a NUL and silently truncate
+   the rest of the path; a value above `\377` is not a single byte at all and would
+   wrap when cast to char. Both are left as their literal text, so the path stays
+   intact and inspectable instead of being silently mangled. */
 static void mount_unescape(char *s)
 {
     char *r = s, *w = s;
     while (*r) {
         if (r[0] == '\\' && r[1] >= '0' && r[1] <= '7' &&
             r[2] >= '0' && r[2] <= '7' && r[3] >= '0' && r[3] <= '7') {
-            *w++ = (char)((r[1]-'0')*64 + (r[2]-'0')*8 + (r[3]-'0'));
-            r += 4;
-        } else {
-            *w++ = *r++;
+            int v = (r[1]-'0')*64 + (r[2]-'0')*8 + (r[3]-'0');
+            if (v >= 1 && v <= 255) {
+                *w++ = (char)v;
+                r += 4;
+                continue;
+            }
         }
+        *w++ = *r++;
     }
     *w = '\0';
 }
@@ -211,7 +234,8 @@ static int cpustat_append(char *body, size_t cap, size_t *len, int first,
    utilisation requires two samples. null when /proc/stat is unavailable. */
 static void emit_cpu_stat(void)
 {
-    char *buf = slurp(pf("stat"));
+    int itrunc = 0;
+    char *buf = slurp(pf("stat"), &itrunc);
     if (!buf) { printf("\"cpu_stat\":null"); return; }
     char *body = malloc(CPUSTAT_MAX);
     if (!body) { free(buf); printf("\"cpu_stat\":null"); return; }
@@ -245,7 +269,8 @@ static void emit_cpu_stat(void)
 
 static void emit_loadavg(void)
 {
-    char *buf = slurp(pf("loadavg"));
+    int itrunc = 0;
+    char *buf = slurp(pf("loadavg"), &itrunc);
     if (!buf) { printf("\"loadavg\":null"); return; }
     char *t = trim(buf);
     double l1=0,l5=0,l15=0; unsigned running=0,total=0; unsigned long lastpid=0;
@@ -262,7 +287,8 @@ static void emit_loadavg(void)
 
 static void emit_cpuinfo(void)
 {
-    char *buf = slurp(pf("cpuinfo"));
+    int itrunc = 0;
+    char *buf = slurp(pf("cpuinfo"), &itrunc);
     if (!buf) { printf("\"cpu\":null"); return; }
     int count = 0;
     char model[128] = "", hardware[128] = "", mhz[64] = "";
@@ -280,11 +306,23 @@ static void emit_cpuinfo(void)
         }
         line = strtok_r(NULL, "\n", &save);
     }
-    char em[256], eh[256];
+    /* A /proc/cpuinfo that yielded NO processor entry and no model is not a CPU
+       description at all (an unreadable or unparseable file): report it as
+       UNAVAILABLE, never as a CPU count of zero. */
+    if (count == 0 && !model[0] && !hardware[0] && !mhz[0]) {
+        printf("\"cpu\":null");
+        free(buf);
+        return;
+    }
+    char em[800], eh[800], emhz[512];
     json_escape(model, em, sizeof(em));
     json_escape(hardware, eh, sizeof(eh));
+    /* BogoMIPS is device-controlled text too: it must be escaped like every other
+       string, or a value containing a quote or a backslash produces malformed JSON
+       and the collector rejects the whole sample. */
+    json_escape(mhz, emhz, sizeof(emhz));
     printf("\"cpu\":{\"count\":%d,\"model\":\"%s\",\"hardware\":\"%s\",\"bogomips\":\"%s\"}",
-           count, em, eh, mhz);
+           count, em, eh, emhz);
     free(buf);
 }
 
@@ -300,7 +338,8 @@ static void emit_meminfo(void)
     };
     int found[8] = {0,0,0,0,0,0,0,0};
     unsigned long long val[8] = {0,0,0,0,0,0,0,0};
-    char *buf = slurp(pf("meminfo"));
+    int itrunc = 0;
+    char *buf = slurp(pf("meminfo"), &itrunc);
     if (buf) {
         char *save, *line = strtok_r(buf, "\n", &save);
         while (line) {
@@ -326,17 +365,41 @@ static void emit_meminfo(void)
 
 /* ------------------------------------------------------------------ statvfs */
 
+/* df-compatible Use%, rounded UP to match df (which uses a ceiling, not a floor):
+     pct = ceil(used * 100 / (used + avail))
+   The product is guarded against overflow so a very large filesystem cannot wrap
+   the multiplication. */
+static unsigned used_percent_ceiling(unsigned long long used,
+                                     unsigned long long avail)
+{
+    unsigned long long denom = used + avail;
+    if (denom == 0) return 0;
+    unsigned long long pct;
+    if (used > (0xFFFFFFFFFFFFFFFFULL - denom) / 100ULL) {
+        pct = (unsigned long long)((double)used * 100.0 / (double)denom + 0.9999);
+    } else {
+        pct = (used * 100ULL + denom - 1ULL) / denom;
+    }
+    if (pct > 100ULL) pct = 100ULL;
+    return (unsigned)pct;
+}
+
 /* Emits df-compatible capacity figures:
      total_bytes = f_blocks  * f_frsize
      free_bytes  = f_bfree   * f_frsize   (filesystem-wide free, incl. reserved)
      avail_bytes = f_bavail  * f_frsize   (available to an unprivileged writer)
      used_bytes  = total - free
-     used_percent = used / (used + avail)   [same basis as df's Use%]
-   inodes are null when the kernel reports none (e.g. UBIFS), not 0. */
+     used_percent = ceil(used / (used + avail))   [same basis and rounding as df]
+   inodes are null when the kernel reports none (e.g. UBIFS), not 0.
+
+   A filesystem can report MORE free blocks than total blocks (a shrinking mount, or
+   a filesystem bug). `total - f_bfree` then UNDERFLOWS to a near-2^64 value, making
+   used_percent absurd and making the collector reject the whole sample, so the free
+   figures are clamped to total first. */
 static void emit_statvfs_pair(const char *path)
 {
     struct statvfs v;
-    char ep[256];
+    char ep[512];
     json_escape(path, ep, sizeof(ep));
     if (statvfs(path, &v) != 0) {
         char err[128];
@@ -348,9 +411,10 @@ static void emit_statvfs_pair(const char *path)
     unsigned long long total = (unsigned long long)v.f_blocks * bsize;
     unsigned long long avail = (unsigned long long)v.f_bavail * bsize;
     unsigned long long free_ = (unsigned long long)v.f_bfree  * bsize;
+    if (free_ > total) free_ = total;
+    if (avail > total) avail = total;
     unsigned long long used  = total - free_;
-    unsigned long long denom = used + avail;
-    unsigned pct = denom ? (unsigned)((used * 100ULL) / denom) : 0;
+    unsigned pct = used_percent_ceiling(used, avail);
     printf("{\"path\":\"%s\",\"available\":true,\"total_bytes\":%llu,\"free_bytes\":%llu,"
            "\"avail_bytes\":%llu,\"used_bytes\":%llu,\"used_percent\":%u,",
            ep, total, free_, avail, used, pct);
@@ -364,6 +428,36 @@ static void emit_statvfs_pair(const char *path)
 /* --------------------------------------------------------------- /proc/mounts */
 
 struct mnt { char dev[256], mp[256], fstype[64], opts[256]; };
+
+/* Split one /proc/mounts line into its first four whitespace-separated fields.
+
+   Returns 1 on success, 0 when the line has fewer than four fields, and -1 when a
+   field is TOO LONG for its buffer. The overlong case is reported, never truncated:
+   `sscanf("%255s ...")` silently cut a long field and left the remainder in the
+   stream, so every LATER field shifted by one and statvfs ran on a mangled path. */
+static int split_mount_line(char *line, char *dev, size_t dn, char *mp, size_t mn,
+                            char *fstype, size_t fn, char *opts, size_t on)
+{
+    char *dst[4];
+    size_t cap[4];
+    dst[0] = dev;    cap[0] = dn;
+    dst[1] = mp;     cap[1] = mn;
+    dst[2] = fstype; cap[2] = fn;
+    dst[3] = opts;   cap[3] = on;
+
+    char *p = line;
+    for (int i = 0; i < 4; i++) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p || *p == '\n' || *p == '\r') return 0;      /* too few fields */
+        char *start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0 || len >= cap[i]) return -1;           /* overlong: do not cut */
+        memcpy(dst[i], start, len);
+        dst[i][len] = '\0';
+    }
+    return 1;
+}
 
 static int is_virtual_fs(const char *t)
 {
@@ -406,18 +500,31 @@ static int mount_is_dup(const struct mnt *arr, int n, const struct mnt *e)
 
 /* Parse /proc/mounts, de-duplicating identical (dev, mountpoint, fstype) records.
    The ASUS firmware lists /tmp/mnt twice, which previously produced duplicate
-   filesystem and storage entries. Returns the count; out may be NULL on failure. */
-static int parse_mounts(struct mnt **out, int *dups_dropped)
+   filesystem and storage entries. Returns the count of kept records.
+
+   `seen`, `overlong`, `dups_dropped` and `truncated` (all optional) report what the
+   bound did, so a short list is never mistaken for a complete one. */
+static int parse_mounts(struct mnt **out, int *dups_dropped, int *seen,
+                        int *overlong, int *truncated)
 {
-    *out = NULL; if (dups_dropped) *dups_dropped = 0;
-    char *buf = slurp(pf("mounts"));
+    *out = NULL;
+    if (dups_dropped) *dups_dropped = 0;
+    if (seen) *seen = 0;
+    if (overlong) *overlong = 0;
+    if (truncated) *truncated = 0;
+    int itrunc = 0;
+    char *buf = slurp(pf("mounts"), &itrunc);
     if (!buf) return 0;
+    if (itrunc && truncated) *truncated = 1;
     int cap = 32, n = 0;
     struct mnt *m = malloc(sizeof(*m) * cap);
     char *save, *line = strtok_r(buf, "\n", &save);
     while (line && m) {
         struct mnt e;
-        if (sscanf(line, "%255s %255s %63s %255s", e.dev, e.mp, e.fstype, e.opts) == 4) {
+        int r = split_mount_line(line, e.dev, sizeof e.dev, e.mp, sizeof e.mp,
+                                 e.fstype, sizeof e.fstype, e.opts, sizeof e.opts);
+        if (r > 0) {
+            if (seen) (*seen)++;
             mount_unescape(e.dev);
             mount_unescape(e.mp);
             if (mount_is_dup(m, n, &e)) {
@@ -426,7 +533,10 @@ static int parse_mounts(struct mnt **out, int *dups_dropped)
                 continue;
             }
             if (n == cap) {
-                if (cap >= STATVFS_MAX_ENTRIES) break;
+                if (cap >= STATVFS_MAX_ENTRIES) {
+                    if (truncated) *truncated = 1;
+                    break;
+                }
                 int ncap = cap * 2;
                 if (ncap > STATVFS_MAX_ENTRIES) ncap = STATVFS_MAX_ENTRIES;
                 struct mnt *nm = realloc(m, sizeof(*m) * ncap);
@@ -434,6 +544,9 @@ static int parse_mounts(struct mnt **out, int *dups_dropped)
                 m = nm; cap = ncap;
             }
             m[n++] = e;
+        } else if (r < 0) {
+            if (seen) (*seen)++;
+            if (overlong) (*overlong)++;
         }
         line = strtok_r(NULL, "\n", &save);
     }
@@ -443,6 +556,32 @@ static int parse_mounts(struct mnt **out, int *dups_dropped)
 }
 
 /* ------------------------------------------------------------------ selftest */
+
+/* Read the EXPLICIT boot identity from /proc/stat's `btime <epoch>` line.
+   Returns 1 and sets *out on success; 0 when the file or the line is unavailable or
+   out of range. `btime` is a wall-clock epoch, so it is only ever COMPARED between
+   two samples, never used as a duration. */
+static int read_btime(long long *out)
+{
+    int itrunc = 0;
+    char *buf = slurp(pf("stat"), &itrunc);
+    if (!buf) return 0;
+    int found = 0;
+    char *save, *line = strtok_r(buf, "\n", &save);
+    while (line) {
+        if (strncmp(line, "btime ", 6) == 0) {
+            long long v = 0;
+            if (sscanf(line + 6, "%lld", &v) == 1 && v > 0 && v < 1000000000000LL) {
+                *out = v;
+                found = 1;
+            }
+            break;
+        }
+        line = strtok_r(NULL, "\n", &save);
+    }
+    free(buf);
+    return found;
+}
 
 static int selftest(void)
 {
@@ -515,7 +654,47 @@ static int selftest(void)
     strcpy(root.dev, "/dev/root"); strcpy(root.mp, "/"); strcpy(root.fstype, "ext4");
     if (is_storage_candidate(&root)){ fprintf(stderr, "FAIL rootfs accepted as storage\n"); fail++; }
 
-    if (fail == 0) printf("selftest: OK (5 groups)\n");
+    /* 6. octal escapes that are NOT a single byte must be left literal.
+          \000 would embed a NUL and truncate the path; \777 is above one byte. */
+    char q1[] = "/tmp/mnt/a\\000b";
+    mount_unescape(q1);
+    if (strcmp(q1, "/tmp/mnt/a\\000b")) { fprintf(stderr, "FAIL \\000 decoded\n"); fail++; }
+    char q2[] = "/tmp/mnt/a\\777b";
+    mount_unescape(q2);
+    if (strcmp(q2, "/tmp/mnt/a\\777b")) { fprintf(stderr, "FAIL \\777 decoded\n"); fail++; }
+    char q3[] = "/tmp/mnt/a\\377b";                 /* 255 IS one byte */
+    mount_unescape(q3);
+    if ((unsigned char)q3[10] != 0xFF) { fprintf(stderr, "FAIL \\377 not decoded\n"); fail++; }
+
+    /* 7. /proc/mounts splitting: a normal line, a short line, and an OVERLONG field
+          that must be refused (not truncated, which would shift later fields). */
+    {
+        char l1[] = "/dev/sda1 /tmp/mnt/USB vfat rw,relatime 0 0";
+        char d[64], m2[64], f[64], o[64];
+        if (split_mount_line(l1, d, sizeof d, m2, sizeof m2, f, sizeof f, o, sizeof o) != 1
+            || strcmp(d, "/dev/sda1") || strcmp(m2, "/tmp/mnt/USB") || strcmp(f, "vfat"))
+            { fprintf(stderr, "FAIL mount split\n"); fail++; }
+        char l2[] = "/dev/sda1 /mnt";
+        if (split_mount_line(l2, d, sizeof d, m2, sizeof m2, f, sizeof f, o, sizeof o) != 0)
+            { fprintf(stderr, "FAIL short mount line accepted\n"); fail++; }
+        /* device name longer than the destination buffer */
+        static char l3[600];
+        memset(l3, 0, sizeof l3);
+        snprintf(l3, sizeof l3, "/dev/%0200d /tmp/mnt/USB vfat rw 0 0", 1);
+        if (split_mount_line(l3, d, 32, m2, sizeof m2, f, sizeof f, o, sizeof o) != -1)
+            { fprintf(stderr, "FAIL overlong mount field accepted\n"); fail++; }
+    }
+
+    /* 8. statvfs percentage arithmetic: df-style ceiling, clamped to 100, and safe
+          on the overflow path for a very large filesystem. */
+    if (used_percent_ceiling(0, 100) != 0)     { fprintf(stderr, "FAIL pct zero\n"); fail++; }
+    if (used_percent_ceiling(1, 2) != 34)      { fprintf(stderr, "FAIL pct ceil (floor would be 33)\n"); fail++; }
+    if (used_percent_ceiling(1, 99) != 1)      { fprintf(stderr, "FAIL pct one\n"); fail++; }
+    if (used_percent_ceiling(100, 0) != 100)   { fprintf(stderr, "FAIL pct full\n"); fail++; }
+    if (used_percent_ceiling(9223372036854775808ULL, 1) != 100)
+        { fprintf(stderr, "FAIL pct overflow path\n"); fail++; }
+
+    if (fail == 0) printf("selftest: OK (8 groups)\n");
     else           printf("selftest: %d FAILURE(S)\n", fail);
     return fail;
 }
@@ -524,6 +703,10 @@ static int selftest(void)
 
 int main(int argc, char **argv)
 {
+    /* A closed stdout must become a REPORTED write failure with a non-zero exit, not
+       a silent signal death that a status-only reader could misread. */
+    signal(SIGPIPE, SIG_IGN);
+
     int pretty = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--pretty") || !strcmp(argv[i], "-p")) pretty = 1;
@@ -545,7 +728,7 @@ int main(int argc, char **argv)
        "unavailable" must never be reported as 0. */
     int have_up = 0;
     double up = 0.0;
-    char *uptime = slurp(pf("uptime"));
+    char *uptime = slurp(pf("uptime"), NULL);
     if (uptime) {
         double v;
         if (sscanf(uptime, "%lf", &v) == 1 && v >= 0.0 && v < 1e12) { up = v; have_up = 1; }
@@ -558,8 +741,16 @@ int main(int argc, char **argv)
     json_escape(un.machine, emach, sizeof(emach));
 
     struct mnt *mnts = NULL;
-    int dups = 0;
-    int nmnts = parse_mounts(&mnts, &dups);
+    int dups = 0, mnts_seen = 0, mnts_overlong = 0, mnts_truncated = 0;
+    int nmnts = parse_mounts(&mnts, &dups, &mnts_seen, &mnts_overlong, &mnts_truncated);
+
+    /* boot identity: /proc/stat's `btime` is the EXPLICIT instant the kernel booted.
+       Comparing it between two samples detects a reboot without relying on uptime
+       moving backwards or on a wall clock. This is a second small read of /proc/stat;
+       the file is a few kilobytes and is read again by emit_cpu_stat. */
+    int have_bt = 0;
+    long long btime = 0;
+    if (!read_btime(&btime)) { have_bt = 0; } else { have_bt = 1; }
 
     printf("{%s", nl);
     printf("\"schema\":\"%s\",%s", SCHEMA, nl);
@@ -567,11 +758,22 @@ int main(int argc, char **argv)
     printf("\"units\":{\"uptime_seconds\":\"s\",\"load*\":\"1-min/5-min/15-min runnable average\","
            "\"memory_kb\":\"kB (Linux kB = 1024 bytes)\","
            "\"cpu_stat\":\"USER_HZ jiffies, cumulative counters (needs 2 samples)\","
-           "\"capacity\":\"bytes\",\"used_percent\":\"used/(used+avail), df-compatible\"},%s", nl);
+           "\"boot_time\":\"epoch seconds, from /proc/stat btime (boot identity)\","
+           "\"capacity\":\"bytes\",\"used_percent\":\"ceil(used/(used+avail)), df-compatible\"},%s", nl);
     printf("\"host\":{\"sysname\":\"%s\",\"release\":\"%s\",\"machine\":\"%s\",\"uptime_seconds\":",
            esys, erel, emach);
     if (have_up) printf("%.1f", up); else printf("null");
+    printf(",\"boot_time\":");
+    if (have_bt) printf("%lld", btime); else printf("null");
     printf("},%s", nl);
+
+    /* Explicit reporting of every hard bound, so a shorter-than-expected document is
+       distinguishable from a complete one rather than being silently trusted. */
+    printf("\"limits\":{\"file_read_max_bytes\":%u,\"files_truncated\":%d,"
+           "\"mounts_max\":%d,\"mounts_seen\":%d,\"mounts_overlong\":%d,"
+           "\"mounts_truncated\":%s},%s",
+           (unsigned)SLURP_MAX, g_files_truncated, STATVFS_MAX_ENTRIES, mnts_seen,
+           mnts_overlong, mnts_truncated ? "true" : "false", nl);
 
     fputs(sp, stdout); emit_cpuinfo();   printf(",%s", nl);
     fputs(sp, stdout); emit_loadavg();   printf(",%s", nl);
@@ -600,7 +802,7 @@ int main(int argc, char **argv)
     first = 1;
     for (int i = 0; i < nmnts; i++) {
         if (!is_storage_candidate(&mnts[i])) continue;
-        char ed[256], em[256], ef[64], eo[256];
+        char ed[1600], em[1600], ef[400], eo[1600];
         json_escape(mnts[i].dev, ed, sizeof(ed));
         json_escape(mnts[i].mp,  em, sizeof(em));
         json_escape(mnts[i].fstype, ef, sizeof(ef));
@@ -623,5 +825,15 @@ int main(int argc, char **argv)
     printf("}%s", nl);
 
     free(mnts);
+
+    /* Exit non-zero when the document could not be WRITTEN. `printf` failing (a full
+       disk, a closed pipe) previously still exited 0, so a consumer that only checks
+       the status would treat a truncated or absent document as a good sample.
+       SIGPIPE is ignored above so a closed pipe surfaces as a write error here
+       instead of killing the process with a signal. */
+    if (fflush(stdout) != 0 || ferror(stdout)) {
+        fprintf(stderr, "router_health: stdout write failed: %s\n", strerror(errno));
+        return 1;
+    }
     return 0;
 }
