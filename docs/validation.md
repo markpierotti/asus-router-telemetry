@@ -1,6 +1,6 @@
 # Validation record
 
-Snapshot date: 2026-10-12. Results distinguish private bench hardware work from this portable repository's offline checks.
+Updated: 2026-10-13. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
 
 ## Current identities
 
@@ -11,17 +11,17 @@ Reporter source v1.0.4 (third remediation revision; identical in the bench proje
 ```
 
 ARM artifact rebuilt from that source with the recorded workflow (static, soft-float EABI5, ARMv7-A,
-min kernel 3.2.0), **not distributed** and **OFFLINE-VALIDATED ONLY** — no version of the v1.0.4
-reporter has ever run on the unit:
+min kernel 3.2.0), **not distributed**. This exact v1.0.4 artifact is now hardware-accepted
+with bench collector 1.5.4 for the supervised healthy-path and Ethernet dropout sequence:
 
 ```
 17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36
 ```
 
-The **hardware-accepted** artifact is v1.0.3 (`3069b2bd…2ce0eb`): it is the one that produced the 17
-accepted samples recorded in the [collector hardware record](collector-hardware-test.md). It remains
-preserved in `out/router_health_arm.v1.0.3` (and as `out/router_health` in the bench project until the
-next hardware acceptance replaces it). The older hardware-tested v1.0.2 artifact is also preserved:
+The **historically hardware-accepted** v1.0.3 artifact (`3069b2bd…2ce0eb`) produced the 17
+accepted samples recorded in the [collector hardware record](collector-hardware-test.md).
+Earlier v1.0.3 and v1.0.2 artifacts remain private historical evidence, not files distributed
+in this repository. The active bench artifact is the v1.0.4 digest above:
 
 ```
 3069b2bd3290ab3bb1db2d49b60e7e7c6a8e5090e4735537980c65926d2ce0eb   (reporter v1.0.3 — HARDWARE-ACCEPTED)
@@ -36,8 +36,8 @@ b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.
 > v1.0.4, so the two recipes agree bit for bit. apt packages remain unpinned, so a future rebuild on
 > updated packages may differ; the recorded package versions are the audit trail.
 
-Collector base version: **1.5.4** (offline-tested only; the last collector run on the unit is
-1.5.2). [Import manifest](import-manifest.json) records the bench-file and portable-copy hashes;
+Collector base version: **1.5.4**. Its functionally aligned private bench copy passed
+the supervised dropout/recovery sequence; this portable configuration was checked offline. [Import manifest](import-manifest.json) records the bench-file and portable-copy hashes;
 only deliberate configuration differences (bench target, data dir, artifact/known_hosts defaults,
 documentation addresses) remain.
 
@@ -71,7 +71,7 @@ A follow-up independent review (Codex and Claude Code) raised three numeric-inpu
 
 Verification: 137 tests pass on Python 3.11.16 and 3.13.1 (was 116); the partial-reader reproducer now returns within the deadline (0.2 s bound, ~0.2 s elapsed, previously ~2.0 s). The stored JSON, outcome classification and bad-input-then-good-input recovery are asserted. Both copies pass the full suite; `smoke_loop.sh` and `demo_offline.sh` still exit cleanly.
 
-## Third remediation revision (2026-10-12) — OFFLINE-VALIDATED ONLY
+## Third remediation revision (2026-10-12) — historical offline milestone
 
 An independent **static** review (Claude Code, `claude-opus-5-5`, max effort) was then validated by a
 second agent, which independently reproduced five of its findings. Nine findings (F1–F9) were raised;
@@ -108,10 +108,10 @@ build **and** on the ARM artifact under QEMU. `sh build-arm.sh` and the bench `b
 **identical** ARM digest `17ade0d2…66e36` (self-test 8/8 under QEMU). The 17 bench fixture assertions
 and 5 comparator cases still pass against the new artifact.
 
-**This revision ran no hardware test.** No collector 1.5.x and no reporter 1.0.4 has been executed
-on the unit; reconnection after a real transport failure, hardware interruption/cleanup paths,
-unattended authentication, long runs, reboot persistence, USB/NAS and AP operation all remain
-unvalidated.
+**At this remediation milestone, no hardware test was run.** Its then-current collector
+and reporter changes were offline-only. Subsequent healthy-path and dropout hardware
+results are recorded below; those results do not retroactively hardware-test each
+intermediate revision or every offline failure case.
 
 ## Follow-up remediation (offline)
 
@@ -252,10 +252,10 @@ a healthy attempt, the link pulled under the established session, three failures
 incident, recovery, resolution and a clean close — with the lost directory queued exactly
 once and its removal never retried.
 
-**Not established.** The fake `ssh` reports a lost link as an immediately broken channel.
-How long a real multiplexed command hangs on a dead link, whether the local deadline or the
-master's keepalives end it first, and therefore which outcome class the first post-loss
-attempt records, are unmeasured. An absolute sample pointer is honoured verbatim, including
+**Historical offline-review limit.** The fake `ssh` reports a lost link as an immediately
+broken channel. At that review, real lost-link timing/classification were unmeasured.
+The later 1.5.4 cable-loss trial observed one first-failure duration of 22.67 seconds
+and an `unreachable` classification; it does not determine behaviour under all faults. An absolute sample pointer is honoured verbatim, including
 one that names a file outside its data directory; it is not re-anchored. A cancellation that
 lands inside a local evidence write can still cost that attempt's own record, in which case
 the directory is queued at the final close.
@@ -268,7 +268,19 @@ REA/Ghidra recovered a known-answer fixture whose outputs were 7, 10, 22, 37, -1
 
 The [reporter hardware record](hardware-test.md) preserves the first schema-1 pass and the subsequent schema-2 comparison: 26 passed, zero failed, ten separate-sample comparisons inconclusive. The storage placeholder regression is resolved for the no-disk capture.
 
-The [collector hardware record](collector-hardware-test.md) records two milestones on the same unit. The earlier one (collector v1.2.0 / reporter v1.0.2) is two real collections with independently recalculated 1.62% CPU utilisation. The current one (collector v1.4.0 / reporter v1.0.3) is 17 accepted samples across four milestones — two one-shots (1.71%), a **14-sample supervised foreground loop** (`--loop --interval 60`, 14/14 success, a single password prompt, watchdog and artifact gates run once, clean Ctrl-C, no incident) and a post-stop collection (1.16%, exit 0) that proves the foreground lock was released. Every CPU delta was recomputed independently from the saved aggregate counters and matched. Raw samples and private identifiers remain outside this repository. Continuous operation beyond ~13 minutes, reconnection after a real transport failure, hardware interruption/cleanup-failure paths, unattended key authentication, reboot persistence, USB/NAS and AP operation remain unvalidated.
+The [collector hardware record](collector-hardware-test.md) separates each accepted
+revision. Collector 1.2.0 / reporter 1.0.2 produced two samples with independently
+recalculated 1.62% utilisation. Collector 1.4.0 / reporter 1.0.3 produced 17 accepted
+samples across two one-shots, a 14-sample foreground loop and a post-stop one-shot.
+Collector 1.5.2 / reporter 1.0.4 later completed healthy-path acceptance.
+
+The latest [dropout/recovery record](dropout-recovery.md), collector **1.5.4** / reporter
+**1.0.4**, contains 16 attempts, 10 successes and six expected unreachable outcomes.
+Incident thresholds, nine CPU counter comparisons, exit-130 shutdown, exit-0 post-stop
+collection and manual reconciliation of one stranded owned directory were verified.
+The [curated summary](../evidence/dropout-summary.json) publishes numeric results only.
+Raw evidence remains private. Unattended authentication, multi-hour operation, other
+failure conditions, reboot persistence, USB/NAS and AP operation remain unvalidated.
 
 ## Repeatable repository checks
 
@@ -288,4 +300,9 @@ Executed for the portable repository update:
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
 - For collector 1.5.4 the collector suite was run once, serially, in each tree: **292 tests (291 passed, one skipped)** on Python 3.14.7 for this copy and on Python 3.13.1 for the bench copy. The skipped test needs the *test process itself* to have a controlling terminal, which the runner used did not provide; the controlling-PTY input tests create their own and passed.
 
-No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.3** and **1.5.4** are **OFFLINE-TESTED ONLY** and have not been run on the unit. The last collector run on the unit is 1.5.2 with reporter 1.0.4 (healthy path only; see the collector README); the 17-sample hardware record is collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.
+No device requests were made during this documentation closeout. The latest private
+bench hardware milestone is collector 1.5.4 / reporter 1.0.4. Collector 1.5.3 remains
+an offline intermediate revision; the portable configuration is not separately
+hardware-accepted. No code changed for this closeout, so completed offline suites
+were not rerun. New documentation links, curated JSON, privacy boundaries and
+unchanged source/private evidence were checked.

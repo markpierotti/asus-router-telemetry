@@ -1,20 +1,34 @@
 # Collector acceptance on the physical router
 
-Date: 2026-10-12, Australia/Brisbane. All collections were run interactively by Mark Pierotti on one physical RT-AX56U (stock firmware) using the private bench collector against the reporter artifact recorded below. Raw samples, session timestamps, network identifiers, login material and host keys remain outside this repository.
+Updated: 2026-10-13, Australia/Brisbane. Hardware runs used the private bench
+collector on one physical RT-AX56U running stock firmware. Raw samples, network
+identifiers, login material and host keys remain outside this repository.
 
-> **Status note (added after the third remediation revision).** Everything on this page describes
-> **collector v1.4.0 / reporter v1.0.3, artifact `3069b2bd…2ce0eb`** — the pair that actually ran on
-> the unit. That remains the only hardware-accepted pair. A newer revision exists
-> (**collector 1.5.2 / reporter 1.0.4, artifact `17ade0d2…66e36`**) which changed the transport
-> lifecycle, cleanup evidence, diagnostics handling and reporter output. It is **OFFLINE-VALIDATED
-> ONLY**: it has never been executed on the unit, so none of the results below describe it. A revised
-> supervised acceptance sequence is required before any of its claims are used.
+## Latest: collector 1.5.4 / reporter 1.0.4
 
-Two revisions have now been accepted on the unit. The **current** milestone (collector v1.4.0 / reporter v1.0.3) is described first, followed by the earlier milestone (collector v1.2.0 / reporter v1.0.2) as historical evidence for that revision.
+The [supervised Ethernet dropout trial](dropout-recovery.md) passed: **16 attempts,
+10 successes and six expected unreachable outcomes**, with incident opening after
+three failures, resolution after two recovery successes, clean Ctrl-C exit 130 and
+a successful post-stop one-shot. All nine CPU counter comparisons were independently
+recomputed. One stranded owned directory was manually removed after an artifact hash
+check, then verified absent in a separate read-only SSH session. The historical queue
+entry remains unchanged, with resolution recorded separately.
+
+Artifact SHA-256: `17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36`.
+Tested code revision: `633963190ad85b6eed12cae208e1629ba9565430`.
+The portable copy was checked offline; these device runs used its functionally aligned
+bench counterpart with private operator defaults.
+
+Collector 1.5.2 / reporter 1.0.4 also completed a prior supervised healthy-path
+acceptance. Its loop included one operator-caused authentication failure; it is not
+presented as an all-success run. Collector 1.5.3 was an offline remediation step,
+not a separately hardware-accepted revision.
+
+The earlier records below apply only to their stated versions.
 
 ---
 
-## Current revision: collector v1.4.0 / reporter v1.0.3
+## Historical revision: collector v1.4.0 / reporter v1.0.3
 
 Reporter artifact SHA-256:
 
@@ -85,9 +99,9 @@ An independent read of the two saved aggregate CPU counter sets produced:
 
 The tested implementation used private bench defaults. This repository adapts paths and requires explicit operator configuration, so it is a separate portable copy checked offline. The following remain unvalidated:
 
-- Continuous operation for periods longer than about 13 minutes (the supervised loop ran ~13 minutes); no multi-hour or overnight run.
-- Reconnection after a real network or transport failure on hardware.
-- Hardware interruption and cleanup-failure paths (exercised only in the offline suite).
+- Multi-hour or overnight operation. The earlier healthy loop ran about 13 minutes; the later dropout sequence was also short and supervised.
+- Failure modes beyond the one tested Ethernet cable-loss/recovery sequence. Recovery required interactive password authentication.
+- Arbitrary interruption/cleanup-failure paths. Ctrl-C, one failed cleanup during cable loss, and its separate manual reconciliation have been exercised; that does not cover every cancellation timing or filesystem failure.
 - Unattended (key-based) authentication. The current transport explicitly selects password authentication; adding an SSH key alone would not enable unattended use without code/config support.
 - Reboot persistence, USB/NAS storage and AP-mode operation.
 - Monitoring overhead was not benchmarked; the utilisation checks validate counter ratios, not the monitor's incremental CPU cost.

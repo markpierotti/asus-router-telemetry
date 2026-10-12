@@ -1,8 +1,10 @@
 # ASUS Router Telemetry
 
-**Custom ARM telemetry on a consumer router, without replacing its firmware.**
+**Custom ARM telemetry on stock firmware — with hardware-tested outage detection and recovery.**
 
 A C reporter and Python collector developed through firmware analysis, cross-compilation, adversarial testing and validation on a physical ASUS RT-AX56U. The reporter emits Linux system measurements as JSON; the external collector verifies execution, saves history and calculates CPU utilisation. Healthy collection makes zero model calls.
+
+The latest supervised trial recorded **16 attempts: 10 successful samples and six expected link-loss failures**. The collector opened and resolved an incident at the configured thresholds, preserved uncertain cleanup through recovery, and stopped cleanly. Read the [project case study](docs/case-study.md) or the [dropout/recovery evidence](docs/dropout-recovery.md).
 
 ## Demonstrated on hardware
 
@@ -18,9 +20,10 @@ A C reporter and Python collector developed through firmware analysis, cross-com
 | Follow-up review remediation | Numeric-input containment (huge/overflowing JSON numbers classified, not crashed), strict JSON storage, and non-blocking time-bounded artifact transfer fixed, each with a behavioural regression test |
 | Third review remediation (offline) | Nine further findings (F1–F9) addressed: parser containment and bounded/sanitised diagnostics, the reporter-to-collector null contract, control-master liveness gating with no interactive fallback, recorded ownership/cleanup uncertainty, signal-driven teardown, explicit boot identity, and reporter output/format fixes — 73 new regressions |
 | Follow-up review remediation (offline) | Four reproduced defects (R1–R4): provisioning cleanup facts preserved for every error class, cancellation-safe teardown with an independently-released lock, an honest master-shutdown verdict with **no PID signalling**, and a corrected acceptance preservation check — 15 new regressions that fail on the previous revision |
-| Continuous operation beyond ~13 min / unattended auth / AP / USB NAS / reconnection after a real failure | Not yet validated |
+| Supervised Ethernet dropout/recovery, collector 1.5.4 / reporter 1.0.4 | 16 attempts; incident opened after three failures, resolved after two successes; exit 130 on Ctrl-C, post-stop exit 0; stranded directory reconciled separately |
+| Multi-hour operation / unattended auth / AP / USB NAS / other failure modes | Not yet validated |
 
-The [next-phase Hermes prompt](docs/next-phase-prompt.md) framed the foreground monitoring trial, which has since been completed — see the [collector hardware record](docs/collector-hardware-test.md).
+The [archived Hermes prompt](docs/next-phase-prompt.md) framed an earlier foreground trial. The [collector hardware record](docs/collector-hardware-test.md) separates historical results from the latest 1.5.4 milestone.
 
 See [reporter hardware tests](docs/hardware-test.md), [collector hardware tests](docs/collector-hardware-test.md) and [validation](docs/validation.md). This is custom userspace software, not a custom firmware image or a deployed SOC.
 
@@ -47,8 +50,8 @@ Requires Docker with linux/amd64 support. The base image is pinned by digest, bu
 
 ## Components
 
-- `src/router_health.c`: reporter v1.0.4, schema `router_health/2`; host, uptime, **boot identity** (`host.boot_time`), CPU counters, load, memory, filesystem capacity, storage candidates and an explicit `limits` block. Output is always valid UTF-8/JSON, including under CPU-counter truncation (represented as `cpu_stat._truncated`); a metric that cannot be read is `null`, never 0; a failed stdout write exits non-zero. **Offline-validated only.**
-- `collector/`: foreground Python collector v1.5.4, bounded SSH transport with byte ceilings, non-blocking time-bounded transfer, hardened provisioning gates, a control-master liveness gate, sanitised diagnostics, an ownership-aware cleanup model with durable pending-cleanup evidence, local history, derived CPU measurements and collection incidents. **Offline-validated only.**
+- `src/router_health.c`: reporter v1.0.4, schema `router_health/2`; host, uptime, **boot identity** (`host.boot_time`), CPU counters, load, memory, filesystem capacity, storage candidates and an explicit `limits` block. Output is always valid UTF-8/JSON, including under CPU-counter truncation (represented as `cpu_stat._truncated`); a metric that cannot be read is `null`, never 0; a failed stdout write exits non-zero. **Validated on the bench router with the exact artifact recorded in the hardware results.**
+- `collector/`: foreground Python collector v1.5.4, bounded SSH transport with byte ceilings, non-blocking time-bounded transfer, hardened provisioning gates, a control-master liveness gate, sanitised diagnostics, an ownership-aware cleanup model with durable pending-cleanup evidence, local history, derived CPU measurements and collection incidents. **Portable configuration checked offline; functionally aligned private bench copy passed supervised hardware acceptance.**
 - `tests/`: embedded-test runner, JSON smoke check, synthetic `/proc` fixtures and reporter edge tests.
 - `docs/`: design, validation, hardware milestones and AI-assisted provenance.
 

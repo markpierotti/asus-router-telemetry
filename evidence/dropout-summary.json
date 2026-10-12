@@ -1,0 +1,114 @@
+{
+  "schema": "rtax.curated-hardware-milestone/1",
+  "date_local": "2026-10-13",
+  "timezone": "Australia/Brisbane",
+  "classification": "Curated numeric summary of private bench hardware evidence; not raw telemetry or an independently repeatable public hardware trace",
+  "code_commit_tested": "633963190ad85b6eed12cae208e1629ba9565430",
+  "collector_version": "1.5.4",
+  "reporter_version": "1.0.4",
+  "reporter_schema": "router_health/2",
+  "artifact_sha256": "17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36",
+  "target": {
+    "model": "ASUS RT-AX56U",
+    "hardware_revision": "1.0",
+    "firmware": "3.0.0.4.386_45898",
+    "kernel": "4.1.52",
+    "architecture": "armv7l"
+  },
+  "fault": "Operator unplugged only the isolated Ethernet bench cable, then restored it; router stayed powered",
+  "attempts": 16,
+  "accepted_samples": 10,
+  "expected_unreachable_outcomes": 6,
+  "loop_interval_seconds": 30,
+  "incident_open_after_failures": 3,
+  "incident_resolve_after_successes": 2,
+  "loop_exit_code": 130,
+  "post_stop_exit_code": 0,
+  "final_incident_open": false,
+  "unconfirmed_directory_entries": 1,
+  "manual_reconciliation": "Exact owned path removed after reporter hash check; absence verified over a separate read-only SSH connection; append-only history retained",
+  "historical_files_reverified": 41,
+  "original_trial_files_reverified": 17,
+  "preservation_manifest_pins_reverified": 2,
+  "cpu_counter_pairs": [
+    {
+      "pair": 1,
+      "delta_total": 25665,
+      "delta_idle_including_iowait": 24981,
+      "recomputed_util_percent": 2.67,
+      "collector_util_percent": 2.67
+    },
+    {
+      "pair": 2,
+      "delta_total": 32344,
+      "delta_idle_including_iowait": 31631,
+      "recomputed_util_percent": 2.2,
+      "collector_util_percent": 2.2
+    },
+    {
+      "pair": 3,
+      "delta_total": 6623,
+      "delta_idle_including_iowait": 6486,
+      "recomputed_util_percent": 2.07,
+      "collector_util_percent": 2.07
+    },
+    {
+      "pair": 4,
+      "delta_total": 11997,
+      "delta_idle_including_iowait": 11893,
+      "recomputed_util_percent": 0.87,
+      "collector_util_percent": 0.87
+    },
+    {
+      "pair": 5,
+      "delta_total": 11998,
+      "delta_idle_including_iowait": 11830,
+      "recomputed_util_percent": 1.4,
+      "collector_util_percent": 1.4
+    },
+    {
+      "pair": 6,
+      "delta_total": 91722,
+      "delta_idle_including_iowait": 90452,
+      "recomputed_util_percent": 1.38,
+      "collector_util_percent": 1.38
+    },
+    {
+      "pair": 7,
+      "delta_total": 4270,
+      "delta_idle_including_iowait": 4144,
+      "recomputed_util_percent": 2.95,
+      "collector_util_percent": 2.95
+    },
+    {
+      "pair": 8,
+      "delta_total": 12005,
+      "delta_idle_including_iowait": 11906,
+      "recomputed_util_percent": 0.82,
+      "collector_util_percent": 0.82
+    },
+    {
+      "pair": 9,
+      "delta_total": 32760,
+      "delta_idle_including_iowait": 32040,
+      "recomputed_util_percent": 2.2,
+      "collector_util_percent": 2.2
+    }
+  ],
+  "provenance": {
+    "device_execution": "Human operator in interactive Terminal; password entered directly to SSH",
+    "local_verification": "Codex read private saved evidence and independently recomputed aggregate CPU counter ratios",
+    "exit_statuses": "Operator terminal transcript; successful post-stop sample also persisted",
+    "directory_absence": "Operator-executed read-only SSH check; saved local output inspected by Codex"
+  },
+  "scope_limits": [
+    "One supervised cable-loss and recovery sequence",
+    "Private bench defaults; portable copy not separately hardware-tested",
+    "No unattended or multi-hour acceptance",
+    "No proof of every interruption or cleanup failure mode",
+    "No AP, USB/NAS, firmware-change or reboot acceptance",
+    "CPU utilisation is a snapshot ratio, not incremental monitoring-overhead measurement",
+    "SSH master conclusion is from its local control socket, not an independent process identity check",
+    "Documented terminal-handover timing race remains"
+  ]
+}

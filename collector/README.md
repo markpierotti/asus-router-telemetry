@@ -91,4 +91,20 @@ Evidence files are created `0600` and their directories `0700` regardless of the
 
 ## Validation boundary
 
-The bench collector completed 17 accepted hardware samples (**collector v1.4.0 / reporter v1.0.3**, artifact `3069b2bd…2ce0eb`) with independently cross-checked CPU utilisation, and the healthy-path acceptance of **collector v1.5.2 / reporter v1.0.4** (steps 1–4) is complete on the unit. Versions 1.5.3 and 1.5.4 are **offline-tested only**: neither has been run on the unit, and the last hardware-validated collector is 1.5.2. See [hardware results](../docs/collector-hardware-test.md) and [validation](../docs/validation.md). Tests cover controlling-PTY input and terminal restoration, descendant cleanup, local execution of the remote watchdog strings, master loss and shutdown verification, failed-provision and teardown evidence, an offline rehearsal of link loss under an established session through to recovery, hostile diagnostics, the reporter-to-collector null contract, file modes and torn-line repair, fake-SSH transport, incidents, retention and schema checks. The fake `ssh` models a lost link as an immediately broken channel; what real OpenSSH does under a lost link (how long a command hangs, which outcome class results) is unmeasured. They are not an exhaustive audit or proof of long-term reliability.
+The latest bench milestone is **collector 1.5.4 / reporter 1.0.4**: a supervised
+Ethernet cable-loss/recovery trial recorded 16 attempts, 10 successes and six expected
+`unreachable` outcomes. The incident opened after three failures and resolved after
+two recovery successes. Ctrl-C exited 130; the post-stop one-shot exited zero. One
+stranded owned directory was manually reconciled and separately verified absent,
+while its historical queue entry remained intact. All nine CPU counter comparisons
+were independently reproduced. See [dropout results](../docs/dropout-recovery.md),
+[historical hardware results](../docs/collector-hardware-test.md) and
+[validation](../docs/validation.md).
+
+These hardware runs used private bench defaults; this portable configuration was
+checked offline. Tests cover controlling-PTY input, terminal restoration, descendant
+cleanup, watchdog execution, master loss, provisioning/teardown evidence, parser
+containment, fake-SSH transport, incidents and retention. The real cable-loss trial
+adds evidence for one supervised failure path; it does not establish unattended
+authentication, multi-hour reliability or every transport/cancellation condition.
+The documented terminal-handover timing race remains a limitation.

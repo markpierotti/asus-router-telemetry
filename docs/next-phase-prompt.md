@@ -1,4 +1,8 @@
-# Next Hermes phase: foreground monitoring trial
+# Archived Hermes prompt: foreground monitoring trial
+
+This historical prompt has been completed and is retained for provenance. Do not
+restart that trial from this file. The latest milestone is the
+[1.5.4 supervised dropout/recovery trial](dropout-recovery.md).
 
 Use the reverse-engineer profile. The existing DeepSeek Flash / Medium setup is sufficient; this phase needs no new model integration.
 
