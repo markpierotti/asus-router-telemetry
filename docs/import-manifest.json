@@ -1,7 +1,10 @@
 {
   "date": "2026-10-12",
-  "reporter_source_sha256": "8e4ce0e2034886f6e8f1f97cfde76323f5b0276e7b377194134d1df726e4f016",
-  "bench_collector_version": "1.2.0",
+  "note": "Remediation revision: the collector containment/locking/budget fixes and the reporter output-integrity fixes were applied to BOTH the private bench copy and this portable copy. Only deliberate configuration differences remain (bench target/user, data dir, artifact and known_hosts defaults, and the documentation addresses in tests).",
+  "reporter_source_sha256": "73ff16a943c2dbd5a6be12cfbe57b72d1d03425d9a19544241832dd817fff795",
+  "reporter_version": "1.0.3",
+  "collector_version": "1.3.0",
+  "bench_collector_version": "1.3.0",
   "adaptations": [
     "explicit operator configuration",
     "portable artifact/data paths",
@@ -19,44 +22,44 @@
       "portable_sha256": "b1df88a18e992da98b4e3cc4b1e9c107bf8f5c3346abcaf9c5ffea8835383703"
     },
     "rtax_telemetry/__init__.py": {
-      "bench_sha256": "9af2e4cfbf0503d34c737398941e6652d4e52e9a06e3ecf2c72e632c97a330a7",
-      "portable_sha256": "9af2e4cfbf0503d34c737398941e6652d4e52e9a06e3ecf2c72e632c97a330a7"
+      "bench_sha256": "dd6f52d9ab9aa9117538cb372d82e2c00633753b936a938076453c06d63f413a",
+      "portable_sha256": "dd6f52d9ab9aa9117538cb372d82e2c00633753b936a938076453c06d63f413a"
     },
     "rtax_telemetry/cli.py": {
-      "bench_sha256": "d886cd56c83605bd02c004d0700fba27415813f52ff02fb12720ed9330a95516",
-      "portable_sha256": "fc1cc64e30928432ccd91cd1743cca416a07a9dbb6d73212c94c27b437dd6c62"
+      "bench_sha256": "ba2f31192ea7645cb781ee42b9c251a8fefd98a8ef0e6edf676dbc804e75a5b0",
+      "portable_sha256": "f1bc8d59fb8c63384e01db1ed13b3fc11950080e87b48b9abbc2359cf8f895bb"
     },
     "rtax_telemetry/core.py": {
-      "bench_sha256": "f0dace8898bd2610474870ce076ecba52cda847c88165fa4564494b94c352e87",
-      "portable_sha256": "f0dace8898bd2610474870ce076ecba52cda847c88165fa4564494b94c352e87"
+      "bench_sha256": "9f621b2a920fe8459d3e76ed48e6224e666a05f45b0595e461e1e3cc1f8fed29",
+      "portable_sha256": "9f621b2a920fe8459d3e76ed48e6224e666a05f45b0595e461e1e3cc1f8fed29"
     },
     "rtax_telemetry/cpu.py": {
-      "bench_sha256": "064750db41c36992d1b84da6bca42be41e0a81b6371c6684bb6cc4b6a8635dc9",
-      "portable_sha256": "064750db41c36992d1b84da6bca42be41e0a81b6371c6684bb6cc4b6a8635dc9"
+      "bench_sha256": "2c27f27f43683e1e09715cc5ce31c8b1d15d34b8042487b48d2862f212f6a70f",
+      "portable_sha256": "2c27f27f43683e1e09715cc5ce31c8b1d15d34b8042487b48d2862f212f6a70f"
     },
     "rtax_telemetry/errors.py": {
-      "bench_sha256": "29635c1a0e342af7735cec899a43035d016b3bfd3c1f7802059ef30154cd2833",
-      "portable_sha256": "29635c1a0e342af7735cec899a43035d016b3bfd3c1f7802059ef30154cd2833"
+      "bench_sha256": "e4f12fb46b9d5f71c9aa0f31822a24e97e48501a2b5af7cee5dea56f881d13af",
+      "portable_sha256": "e4f12fb46b9d5f71c9aa0f31822a24e97e48501a2b5af7cee5dea56f881d13af"
     },
     "rtax_telemetry/mock.py": {
-      "bench_sha256": "27185e227a2c740f82a9c77c8892a5b4f5a97338b33eb86e63b9f1c5e4fe9072",
-      "portable_sha256": "27185e227a2c740f82a9c77c8892a5b4f5a97338b33eb86e63b9f1c5e4fe9072"
+      "bench_sha256": "9dd2361570b69332b50b91555a6d9ff94047c59c40be26bc1a46c8ef41029f19",
+      "portable_sha256": "9dd2361570b69332b50b91555a6d9ff94047c59c40be26bc1a46c8ef41029f19"
     },
     "rtax_telemetry/schema.py": {
-      "bench_sha256": "313aa59861aa8c2d50aecb28d8dac405c1cb671c51bf521b018e005b2f06ee49",
-      "portable_sha256": "313aa59861aa8c2d50aecb28d8dac405c1cb671c51bf521b018e005b2f06ee49"
+      "bench_sha256": "a842a8b1e0380f64998a32638e0753325c2709868d118a3f6a4eaad76e000116",
+      "portable_sha256": "a842a8b1e0380f64998a32638e0753325c2709868d118a3f6a4eaad76e000116"
     },
     "rtax_telemetry/status.py": {
       "bench_sha256": "165b8453bc07ab495f304e8ddd643d89a96107295ed4bbf752e490c5b5bb22d3",
       "portable_sha256": "165b8453bc07ab495f304e8ddd643d89a96107295ed4bbf752e490c5b5bb22d3"
     },
     "rtax_telemetry/store.py": {
-      "bench_sha256": "4a655279f60fd41292e105415e45a23b5c6ea73c90893d0c44d7a73c883fa52d",
-      "portable_sha256": "4a655279f60fd41292e105415e45a23b5c6ea73c90893d0c44d7a73c883fa52d"
+      "bench_sha256": "96690ff28502ada2e73cf95ebd988c24e3743a9b5af6ed510a1968c36686a14c",
+      "portable_sha256": "96690ff28502ada2e73cf95ebd988c24e3743a9b5af6ed510a1968c36686a14c"
     },
     "rtax_telemetry/transport.py": {
-      "bench_sha256": "78b77b2888e237153fa4e4a6105e1b1f5ee73fbbc233aaec824955e4f2cc522f",
-      "portable_sha256": "22e4679a212f5fe07a4373835a7dfe4a912ed3e6d93dfcf38fa68298515c4060"
+      "bench_sha256": "71bb694cdb87036ffedeecaf88727e6b9c2f955340ebaf04097973ff416671be",
+      "portable_sha256": "bedea4e7118d5911ef1c817037a81f217a3c26666ae9dd3f0bdfebe56a281501"
     },
     "tests/__init__.py": {
       "bench_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -74,13 +77,17 @@
       "bench_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6",
       "portable_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6"
     },
+    "tests/test_fixes.py": {
+      "bench_sha256": "c693e34c83479d692923b3ff7ff6c0d0104dfde816c3b6cde2eef52e34aa51c4",
+      "portable_sha256": "c693e34c83479d692923b3ff7ff6c0d0104dfde816c3b6cde2eef52e34aa51c4"
+    },
     "tests/pty_auth_probe.py": {
       "bench_sha256": "c12954c81440f4557bdef7a91727082d2705d1bdeb3b05129a0c2c98fa95813c",
       "portable_sha256": "7f3211786c379cda50e12a3ca11ce9047decf2451065f792d1561392f54fddc3"
     },
     "tests/fake_ssh.sh": {
-      "bench_sha256": "6518f183e2389a1c6b76d0997aa5eedb951f2ac86f044a782a1b4fa817c34940",
-      "portable_sha256": "0d837b20ad7d3b419b0b5a4ea066986fe3926c6f039eff545d249a1ecb75b262"
+      "bench_sha256": "aeda06a2da1a2568292988cb0deb7f7ab7d705936b4a738d6b014ac188bc465f",
+      "portable_sha256": "4cb3c285810a009d254ac7b536cb98b2e5ee4d00f11b741106124111b7982fad"
     },
     "tests/harness.py": {
       "bench_sha256": "86ccd02cab46dd27066e42d67a62c077655072b3e1e91556a09192b4a4ee4687",

@@ -28,3 +28,5 @@ An independent read of the two saved aggregate CPU counter sets produced:
 ## Limits
 
 The tested implementation used private bench defaults. This repository adapts paths and requires explicit operator configuration, so it is a separate portable copy checked offline. Continuous looping, reconnection after real network failure, hardware interruption/cleanup failure, unattended key authentication, reboot persistence, USB/NAS and AP operation remain unvalidated. The current transport explicitly selects password authentication; adding an SSH key alone would not enable unattended use without code/config support.
+
+**Later revision:** the reporter and collector were subsequently changed by the review remediation (reporter v1.0.3, collector v1.3.0). The two collections recorded above were produced by the **earlier** reporter v1.0.2 / collector v1.2.0 and remain historical evidence for that revision; the rebuilt ARM artifact has **not** been run on the router, so the remediation is offline-validated only.

@@ -2,7 +2,7 @@
 
 Project lead: Mark Pierotti.
 
-Reporter v1.0.2 is imported unchanged from the private bench project; its digest is recorded in [validation](validation.md). Collector v1.2.0 is a portable adaptation: private paths, username, address and host-key digest are removed; operator configuration is explicit; artifact verification remains required for normal live use. The original bench code and private data are untouched.
+Reporter v1.0.3 is the remediation revision of the imported bench reporter; its source digest is recorded in [validation](validation.md). Collector v1.3.0 is a portable adaptation: private paths, username, address and host-key digest are removed; operator configuration is explicit; artifact verification remains required for normal live use. The remediation was applied to BOTH the private bench copy and this portable copy, so they are functionally aligned apart from those deliberate configuration differences.
 
 [Import manifest](import-manifest.json) records the original and adapted code-file hashes. Test fixtures derive from reporter output and contain no device hostname, address, login, host key or credential. Synthetic credentials and documentation addresses in tests are examples, not live access material.
 
