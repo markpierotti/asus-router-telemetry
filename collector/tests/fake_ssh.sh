@@ -35,6 +35,18 @@
 #   transfer_bad_json      artifact "hash" line is a huge non-hex blob
 #   master_wont_exit       `-O exit` succeeds but the master keeps answering
 #   master_start_fail      master establishment exits 255 (Permission denied)
+#   unreachable_after_mkdir  provisioning succeeds up to and including an
+#                          ACKNOWLEDGED mkdir, then the link drops: every later
+#                          multiplexed command - the removal included - exits 255
+#                          with a network diagnostic
+#   selftest_hangs_cleanup_fail  the watchdog self-test (the step after mkdir) never
+#                          returns, and the removal that follows fails; lets a test
+#                          cancel a provision AFTER the directory exists
+#   exit_hangs_delivered   `-O exit` reaches the master (it goes away) and then the
+#                          client hangs, so a test can interrupt the exit request
+#                          and still find the socket ABSENT afterwards
+#   exit_hangs_undelivered `-O exit` hangs before reaching the master, so after an
+#                          interrupted exit request the master still ANSWERS
 #
 # Environment:
 #   FAKE_SSH_MODE           the mode above
@@ -43,6 +55,8 @@
 #                           means the master has gone away
 #   FAKE_SSH_MASTER_PID     the pid `-O check` reports (default 4242)
 #   FAKE_SSH_EXIT_LOG       append a line when `-O exit` is received
+#   FAKE_SSH_CMD_LOG        append the full text of every multiplexed command that
+#                          was received, one per line (what the "router" was sent)
 #   FAKE_SSH_EXTRA          compose a SECOND, independent fault with the mode. It is
 #                           honoured by the two branches where a combination is
 #                           genuinely needed (the artifact transfer and the reporter
@@ -89,10 +103,14 @@ _master_check() {
 for ((i=0; i<${#args[@]}; i++)); do
   if [ "${args[$i]}" = "-O" ] && [ "${args[$((i+1))]:-}" = "exit" ]; then
     if [ -n "${FAKE_SSH_EXIT_LOG:-}" ]; then printf 'exit\n' >> "$FAKE_SSH_EXIT_LOG"; fi
+    # the request never reaches the master: the client just hangs
+    if [ "$mode" = "exit_hangs_undelivered" ]; then sleep 30; exit 0; fi
     case "${FAKE_SSH_MASTER_STATE:-up}" in
       up|down|"") : ;;
       *) [ "$mode" = "master_wont_exit" ] || : > "$FAKE_SSH_MASTER_STATE" ;;
     esac
+    # the request was delivered (the master is gone) but the client does not return
+    if [ "$mode" = "exit_hangs_delivered" ]; then sleep 30; fi
     exit 0
   fi
   if [ "${args[$i]}" = "-O" ] && [ "${args[$((i+1))]:-}" = "check" ]; then
@@ -152,6 +170,20 @@ HOSTILE
   exit 255
 fi
 
+if [ -n "${FAKE_SSH_CMD_LOG:-}" ]; then printf '%s\n' "$cmd" >> "$FAKE_SSH_CMD_LOG"; fi
+
+# The link drops AFTER the mkdir was acknowledged. The KAT, the tool probe and the
+# mkdir fall through to their normal successful branches below; everything later -
+# the self-test, the transfer, and the removal - fails the way a multiplexed command
+# does when its master has lost the peer.
+if [ "$mode" = "unreachable_after_mkdir" ]; then
+  case "$cmd" in
+    *"printf abc"*|*"for t in dd"*|*"mkdir -m 700"*) : ;;
+    *) echo "mux_client_request_session: read from master failed: Broken pipe" 1>&2
+       exit 255 ;;
+  esac
+fi
+
 case "$cmd" in
   *"printf abc"*)
       # The device controls these bytes: a control byte, nothing at all, or a huge
@@ -182,6 +214,7 @@ case "$cmd" in
       bound=$(printf '%s' "$cmd" | grep -o 'sleep [0-9][0-9]*' | head -1 | awk '{print $2}')
       [ -n "${bound:-}" ] || bound=1
       case "$mode" in
+        selftest_hangs_cleanup_fail) sleep 30; exit 0 ;;
         selftest_fail)  echo "selftest_exit=0";   echo "selftest_wd_fired=0"; exit 0 ;;
         selftest_crash) sleep "$bound"; echo "selftest_exit=139"; echo "selftest_wd_fired=0"; exit 0 ;;
         selftest_nofired) sleep "$bound"; echo "selftest_exit=137"; echo "selftest_wd_fired=0"; exit 0 ;;
@@ -211,7 +244,8 @@ case "$cmd" in
       esac ;;
   *"rm -rf"*)
       case "$mode" in
-        cleanup_fail|timeout_cleanup_fail) echo REMOVAL_FAILED 1>&2; exit 1 ;;
+        cleanup_fail|timeout_cleanup_fail|selftest_hangs_cleanup_fail)
+                                           echo REMOVAL_FAILED 1>&2; exit 1 ;;
         cleanup_no_marker)                 exit 0 ;;
         # A removal that takes long enough for a test to interrupt the teardown
         # WHILE the removal is in flight. The directory is left in place, which is

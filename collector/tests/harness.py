@@ -80,12 +80,16 @@ def make_transport(workdir, mode="ok", *, artifact=None, known_hosts=None,
     )
 
 
-def write_ssh_config(data_dir, workdir, mode="ok", **extra):
-    """Write <data_dir>/config.json pointing the CLI at the fake ssh."""
+def write_ssh_config(data_dir, workdir, mode="ok", extra_env=None, **extra):
+    """Write <data_dir>/config.json pointing the CLI at the fake ssh.
+
+    ``extra_env`` is exported by the wrapper (FAKE_SSH_* knobs); every other keyword
+    is a config.json key.
+    """
     import json
     artifact = make_artifact(workdir)
     kh = make_known_hosts(workdir)
-    wrapper = make_wrapper(workdir, mode)
+    wrapper = make_wrapper(workdir, mode, extra_env=extra_env)
     cfg = {
         "host": "192.0.2.1",
         "user": "routeradmin",
