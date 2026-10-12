@@ -14,6 +14,7 @@ A C reporter and Python collector developed through firmware analysis, cross-com
 | Parser comparison | 26 checks passed, zero failed; 10 separate-sample comparisons remained inconclusive |
 | SSH collector | Two real collections accepted, with artifact verification and cleanup recorded |
 | CPU utilisation | 1.62%, independently recalculated from the two saved aggregate counter sets |
+| Independent review remediation | Two low-severity security findings (both needing an authenticated router) and six correctness findings fixed, each with a behavioural regression test |
 | Continuous operation / unattended auth / AP / USB NAS | Not yet validated |
 
 The [next-phase Hermes prompt](docs/next-phase-prompt.md) prepares a short foreground monitoring trial.
@@ -43,9 +44,9 @@ Requires Docker with linux/amd64 support. The base image is pinned by digest, bu
 
 ## Components
 
-- `src/router_health.c`: reporter v1.0.2, schema `router_health/2`; host, uptime, CPU counters, load, memory, filesystem capacity and storage candidates.
-- `collector/`: foreground Python collector v1.2.0, bounded SSH transport, local history, derived CPU measurements and collection incidents.
-- `tests/`: embedded-test runner, JSON smoke check and synthetic `/proc` fixtures.
+- `src/router_health.c`: reporter v1.0.3, schema `router_health/2`; host, uptime, CPU counters, load, memory, filesystem capacity and storage candidates. Output is always valid UTF-8/JSON, including under CPU-counter truncation (represented as `cpu_stat._truncated`).
+- `collector/`: foreground Python collector v1.3.0, bounded SSH transport with byte ceilings and hardened provisioning gates, local history, derived CPU measurements and collection incidents.
+- `tests/`: embedded-test runner, JSON smoke check, synthetic `/proc` fixtures and reporter edge tests.
 - `docs/`: design, validation, hardware milestones and AI-assisted provenance.
 
 Storage detection remains a path/device heuristic, not proof of USB identity. Missing telemetry is not automatically healthy. [Design notes](docs/design.md) explain the boundaries.

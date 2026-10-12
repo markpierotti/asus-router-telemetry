@@ -28,7 +28,7 @@ CPU_FIELDS = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "ste
 SCENARIOS = (
     "success", "malformed", "wrong_schema", "wrong_type", "timeout",
     "auth", "unreachable", "hostkey", "reporter_failure",
-    "reset", "reboot", "zero_elapsed",
+    "reset", "reboot", "zero_elapsed", "nested",
 )
 
 
@@ -85,6 +85,10 @@ class ScenarioTransport:
             raise RemoteCommandError(1, "reporter exited 1: mock failure")
         if s == "malformed":
             return b'{"schema":"router_health/2", oops not json'
+        if s == "nested":
+            # a small but deeply nested document: must be classified, not crash the
+            # interpreter with RecursionError
+            return b'{"extra":' + b'[' * 2000 + b'0' + b']' * 2000 + b'}'
         if s == "wrong_schema":
             d = copy.deepcopy(self._base)
             d["schema"] = "router_health/1"
@@ -94,9 +98,11 @@ class ScenarioTransport:
             d["memory_kb"]["MemTotal"] = "lots"
             return json.dumps(d).encode()
         if s == "reset":
-            # second call: counters move BACKWARDS (no uptime drop -> reset, not reboot)
-            return json.dumps(self._variant(step=100 if i == 0 else -50,
-                                            uptime=1000.0 + i * self.interval)).encode()
+            # second call: counters DROP toward zero (a real counter reset; /proc
+            # counters are unsigned, so they can never go negative) with no uptime
+            # drop, so this is a reset, not a reboot
+            return json.dumps(self._variant(step=100, uptime=1000.0 + i * self.interval,
+                                            reset=(i >= 1))).encode()
         if s == "reboot":
             # uptime drops between samples
             uptime = 1000.0 + i * self.interval
@@ -115,7 +121,7 @@ class ScenarioTransport:
         self.stopped = True
 
     # ---- document synthesis ----------------------------------------------
-    def _variant(self, *, step, uptime, freeze=False):
+    def _variant(self, *, step, uptime, freeze=False, reset=False):
         d = copy.deepcopy(self._base)
         d["host"]["uptime_seconds"] = float(format(uptime, ".1f"))
         n = d["cpu"]["count"]
@@ -125,7 +131,10 @@ class ScenarioTransport:
         for idx in range(n):
             key = "cpu%d" % idx
             prev = self._base["cpu_stat"].get(key, agg)
-            cur = {f: int(prev.get(f, 0)) + step for f in CPU_FIELDS}
+            if reset:
+                cur = {f: 5 for f in CPU_FIELDS}       # restarted near zero
+            else:
+                cur = {f: int(prev.get(f, 0)) + step for f in CPU_FIELDS}
             stat[key] = cur
             for f in CPU_FIELDS:
                 agg[f] += cur[f]

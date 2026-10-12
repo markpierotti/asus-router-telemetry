@@ -51,6 +51,14 @@ class RemoteCommandError(TransportError):
         self.rc = rc
 
 
+class OutputLimitExceeded(TransportError):
+    """The device sent more stdout/stderr than the collector's byte budget allows.
+
+    The child group is terminated and reaped before this is raised; it becomes a
+    classified collection failure (`output_overflow`), never an unbounded buffer.
+    """
+
+
 class ArtifactMismatch(TransportError):
     """The local artifact or the pinned known_hosts failed its hash gate."""
 
@@ -65,6 +73,14 @@ class CleanupError(TransportError):
 
 class MalformedData(TelemetryError):
     """The reporter's stdout was not parseable JSON."""
+
+
+class QuotaExceeded(TelemetryError):
+    """A local storage byte budget was exceeded (write or retention).
+
+    Raised when a single sample would exceed the per-write budget, so the failure
+    is surfaced explicitly instead of silently truncating or exhausting the disk.
+    """
 
 
 class SchemaInvalid(TelemetryError):

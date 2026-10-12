@@ -17,6 +17,8 @@ from . import cpu, schema
 from .errors import (
     ArtifactMismatch,
     MalformedData,
+    OutputLimitExceeded,
+    QuotaExceeded,
     RemoteCommandError,
     RemoteTimeout,
     SchemaInvalid,
@@ -38,6 +40,8 @@ OUTCOME_HOSTKEY = "ssh_hostkey_mismatch"
 OUTCOME_UNREACHABLE = "unreachable"
 OUTCOME_ARTIFACT = "artifact_mismatch"
 OUTCOME_TRANSPORT = "transport_error"
+OUTCOME_OVERFLOW = "output_overflow"
+OUTCOME_STORAGE = "storage_error"
 
 # A one-line human meaning for each outcome, used by the status command.
 OUTCOME_TEXT = {
@@ -51,11 +55,14 @@ OUTCOME_TEXT = {
     OUTCOME_UNREACHABLE: "management address unreachable (does NOT prove the router is down)",
     OUTCOME_ARTIFACT: "artifact/known_hosts hash gate failed",
     OUTCOME_TRANSPORT: "ssh/transport error",
+    OUTCOME_OVERFLOW: "device output exceeded the collector's byte budget",
+    OUTCOME_STORAGE: "local storage byte budget was exceeded",
 }
 
 FAILURE_OUTCOMES = (
     OUTCOME_MALFORMED, OUTCOME_SCHEMA, OUTCOME_TIMEOUT, OUTCOME_REPORTER_FAILURE,
     OUTCOME_AUTH, OUTCOME_HOSTKEY, OUTCOME_UNREACHABLE, OUTCOME_ARTIFACT, OUTCOME_TRANSPORT,
+    OUTCOME_OVERFLOW, OUTCOME_STORAGE,
 )
 
 
@@ -210,6 +217,15 @@ class Collector:
         except ArtifactMismatch as e:
             outcome, detail = OUTCOME_ARTIFACT, str(e)
             self._drop_session()
+        except OutputLimitExceeded as e:
+            # the device sent more output than the byte budget allows: a classified
+            # collection failure, not an unbounded buffer
+            outcome, detail = OUTCOME_OVERFLOW, str(e)
+            self._drop_session()
+        except QuotaExceeded as e:
+            # local storage refused the write; the reporter itself was fine, so the
+            # session is kept for the next attempt
+            outcome, detail = OUTCOME_STORAGE, str(e)
         except TransportError as e:
             outcome, detail = OUTCOME_TRANSPORT, str(e)
             self._drop_session()

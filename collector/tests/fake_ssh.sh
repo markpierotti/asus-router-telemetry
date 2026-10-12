@@ -10,12 +10,17 @@
 # bytes on stdin, so the transport's hash gate is genuinely exercised.
 #
 # Modes:
-#   ok                     everything succeeds
+#   ok                     everything succeeds (tools OK, watchdog kills at the bound)
 #   unreachable            whole invocation -> ssh exit 255, "Connection refused"
 #   authfail               whole invocation -> ssh exit 255, "Permission denied"
 #   timeout                reporter run killed (rc 137)
 #   reporter_fail          reporter exits non-zero
 #   selftest_fail          watchdog self-test reports an UNBOUNDED job (exit 0)
+#   selftest_crash         self-test reports a CRASH status (139) with no timer fire
+#   selftest_nofired       self-test reports status 137 but NO timer-fire evidence
+#   tools_fail             required-tool probe exits non-zero
+#   tools_missing          required-tool probe reports a missing tool
+#   tools_malformed        required-tool probe returns an unrecognised marker
 #   cleanup_fail           remote dir removal fails (REMOVAL_FAILED, rc 1)
 #   timeout_cleanup_fail   reporter killed AND removal fails
 set -u
@@ -38,7 +43,7 @@ case "$last" in
       if IFS= read -r line < /dev/tty; then
         printf 'READ:%s' "$line" > "${FAKE_SSH_TTY_OUT:?FAKE_SSH_TTY_OUT not set}"
       else
-        printf 'READFAIL' > "${FAKE_SSH_TTY_OUT}"
+        printf 'READFAIL' > "$FAKE_SSH_TTY_OUT"
       fi
     fi
     exit 0 ;;
@@ -57,15 +62,26 @@ fi
 
 case "$cmd" in
   *"printf abc"*)       echo "SHA256(stdin)= $KAT"; exit 0 ;;
-  *MISSING:*)           printf 'MISSING:%s\n' ""; exit 0 ;;
+  *"for t in dd"*)
+      case "$mode" in
+        tools_fail)      echo "probe blew up" 1>&2; exit 2 ;;
+        tools_missing)   printf 'TOOLS_MISSING: sha256sum od\n'; exit 0 ;;
+        tools_malformed) printf 'WOBBLE\n'; exit 0 ;;
+        *)               printf 'TOOLS_OK\n'; exit 0 ;;
+      esac ;;
   *"mkdir -m 700"*)     exit 0 ;;
   *"cat > "*)
       sha=$(shasum -a 256 | awk '{print $1}')
       echo "SHA256(x)= $sha"; exit 0 ;;
   *"if=/dev/zero"*)
+      # Emulate the watchdog timing: a genuine bounded kill takes ~the bound.
+      bound=$(printf '%s' "$cmd" | grep -o 'sleep [0-9][0-9]*' | head -1 | awk '{print $2}')
+      [ -n "${bound:-}" ] || bound=1
       case "$mode" in
-        selftest_fail) echo "selftest_exit=0"; exit 0 ;;
-        *)             echo "selftest_exit=137"; exit 0 ;;
+        selftest_fail)  echo "selftest_exit=0";   echo "selftest_wd_fired=0"; exit 0 ;;
+        selftest_crash) sleep "$bound"; echo "selftest_exit=139"; echo "selftest_wd_fired=0"; exit 0 ;;
+        selftest_nofired) sleep "$bound"; echo "selftest_exit=137"; echo "selftest_wd_fired=0"; exit 0 ;;
+        *)              sleep "$bound"; echo "selftest_exit=137"; echo "selftest_wd_fired=1"; exit 0 ;;
       esac ;;
   *"control-exec-ok"*)  echo control-exec-ok; exit 0 ;;
   *"out.json"*)

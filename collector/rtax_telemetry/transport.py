@@ -40,6 +40,7 @@ import hashlib
 import os
 import re
 import secrets
+import selectors
 import shutil
 import signal
 import subprocess
@@ -58,6 +59,7 @@ except ImportError:        # pragma: no cover
 from .errors import (
     ArtifactMismatch,
     CleanupError,
+    OutputLimitExceeded,
     RemoteCommandError,
     RemoteTimeout,
     TransportAuthError,
@@ -77,13 +79,27 @@ OPENSSL_KAT_ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f2001
 
 # Statuses >= 128 mean the job was killed by a signal (128 + signo).
 _KILLED_FROM = 128
+# The watchdog terminates its target with SIGKILL (kill -9) -> 128 + 9.
+_WD_SIGKILL_STATUS = 137
+# The self-test must land within this window around the configured bound, and must
+# show POSITIVE evidence the timer fired. A bare "status >= 128" (which would also
+# accept a crash such as SIGSEGV 139) is deliberately NOT accepted.
+_SELFTEST_LOWER_TOL = 0.5      # seconds below the bound that still count
+_SELFTEST_UPPER_TOL = 3.0      # seconds above the bound that still count
+
+# Byte ceilings for device output. Enforced WHILE RECEIVING (before any full
+# buffering), so an authenticated-but-hostile endpoint cannot exhaust host memory.
+DEFAULT_MAX_STDOUT = 1024 * 1024        # 1 MiB
+DEFAULT_MAX_STDERR = 256 * 1024         # 256 KiB
+_READ_CHUNK = 65536
 
 # --- remote command strings (kept identical in spirit to the proven scripts) ---
 TOOLS_CMD = (
     'miss=""; for t in dd mkdir chmod rm cp cat kill sleep date grep df; do '
     '{ [ -x /bin/$t ] || [ -x /usr/bin/$t ] || [ -x /usr/sbin/$t ] || [ -x /sbin/$t ]; } '
     '|| miss="$miss $t"; done; [ -x /usr/sbin/openssl ] || miss="$miss openssl"; '
-    'printf "MISSING:%s\\n" "$miss"'
+    'if [ -z "$miss" ]; then printf "TOOLS_OK\n"; '
+    'else printf "TOOLS_MISSING:%s\n" "$miss"; fi'
 )
 KAT_CMD = "printf abc | /usr/sbin/openssl dgst -sha256"
 
@@ -114,16 +130,26 @@ def _trap_line(pid_file):
     return "trap '%s; exit 129' HUP INT TERM\n" % _cancel(pid_file)
 
 
-def _wd_start(bound, target_var, pid_file):
-    return (
+def _wd_start(bound, target_var, pid_file, fired_file=None):
+    """Start the detached watchdog.
+
+    When ``fired_file`` is given, the watchdog creates it IMMEDIATELY BEFORE it
+    kills the target, so its existence is positive evidence that the TIMER (not
+    some unrelated crash) terminated the job. The self-test relies on that marker;
+    the normal reporter run does not need it and passes ``None``.
+    """
+    fire = (': > "%s"\n' % fired_file) if fired_file else ""
+    tpl = (
         "(\n"
         "  sleep %d >/dev/null 2>&1 &\n"
         '  echo $! > "%s"\n'
         "  wait\n"
+        + fire +
         '  kill -9 "$%s" 2>/dev/null\n'
         ") >/dev/null 2>&1 &\n"
-        "w=$!\n" % (bound, pid_file, target_var)
+        "w=$!\n"
     )
+    return tpl % (bound, pid_file, target_var)
 
 
 def run_cmd(rd, bound):
@@ -148,17 +174,27 @@ def run_cmd(rd, bound):
 
 def selftest_cmd(rd, bound):
     """The watchdog self-test: a long job that MUST be killed at the bound, with the
-    same signal trap as the real run."""
+    same signal trap as the real run.
+
+    It reports BOTH the job's exit status and whether the watchdog timer actually
+    fired (a marker file the watchdog writes just before it kills). A watchdog that
+    does not bound, a crash that happens to exit >= 128, or a timer that never fired
+    are all distinguishable from a genuine bounded kill.
+    """
     pid_file = "%s/wd.pid" % rd
+    fired_file = "%s/wd.fired" % rd
     return (
         "p=; w=\n"
         + _trap_line(pid_file)
+        + 'rm -f "%s"\n' % fired_file
         + "/bin/dd if=/dev/zero of=/dev/null bs=4096 count=100000000 2>/dev/null &\n"
         + "p=$!\n"
-        + _wd_start(bound, "p", pid_file)
+        + _wd_start(bound, "p", pid_file, fired_file)
         + 'ec=0\nwait "$p" || ec=$?\n'
         + _cancel(pid_file) + "\n"
         + "printf 'selftest_exit=%s\\n' \"$ec\"\n"
+        + 'if [ -f "%s" ]; then printf "selftest_wd_fired=1\\n"; '
+          'else printf "selftest_wd_fired=0\\n"; fi\n' % fired_file
     )
 
 
@@ -326,16 +362,94 @@ def _terminate_and_reap(p, grace=None):
         pass
 
 
+def _close_registered(sel, stream):
+    try:
+        sel.unregister(stream)
+    except (KeyError, ValueError):
+        pass
+    try:
+        stream.close()
+    except Exception:                      # noqa: BLE001
+        pass
+
+
+def _drain_bounded(p, timeout, stdin_bytes, max_stdout, max_stderr):
+    """Drain stdout/stderr incrementally, enforcing byte ceilings WHILE RECEIVING.
+
+    Nothing is fully buffered before the limits are checked: every read is counted
+    and an over-limit stream raises OutputLimitExceeded immediately, so an
+    authenticated-but-hostile endpoint cannot make the host allocate without bound.
+    stdin (the artifact) is written concurrently, so neither direction can deadlock
+    the other.
+    """
+    sel = selectors.DefaultSelector()
+    out = bytearray()
+    err = bytearray()
+    view = memoryview(stdin_bytes) if stdin_bytes is not None else None
+    pos = 0
+    deadline = time.monotonic() + timeout
+    try:
+        if p.stdout is not None:
+            sel.register(p.stdout, selectors.EVENT_READ, "out")
+        if p.stderr is not None:
+            sel.register(p.stderr, selectors.EVENT_READ, "err")
+        if view is not None and p.stdin is not None:
+            sel.register(p.stdin, selectors.EVENT_WRITE, "in")
+        while sel.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(p.args, timeout)
+            for key, _mask in sel.select(timeout=min(remaining, 0.5)):
+                stream = key.fileobj
+                if key.data == "in":
+                    if view is None:               # not registered without stdin_bytes
+                        _close_registered(sel, stream)
+                        continue
+                    try:
+                        n = os.write(stream.fileno(), view[pos:pos + _READ_CHUNK])
+                    except BrokenPipeError:
+                        n = len(view) - pos
+                    pos += n
+                    if pos >= len(view):
+                        _close_registered(sel, stream)
+                    continue
+                chunk = os.read(stream.fileno(), _READ_CHUNK)
+                if not chunk:
+                    _close_registered(sel, stream)
+                    continue
+                if key.data == "out":
+                    out += chunk
+                    if len(out) > max_stdout:
+                        raise OutputLimitExceeded(
+                            "device stdout exceeded the %d-byte limit" % max_stdout)
+                else:
+                    err += chunk
+                    if len(err) > max_stderr:
+                        raise OutputLimitExceeded(
+                            "device stderr exceeded the %d-byte limit" % max_stderr)
+    finally:
+        sel.close()
+    # Every pipe is closed, so the child is (or is about to be) finished; bound the
+    # final wait by whatever remains of the deadline.
+    remaining = deadline - time.monotonic()
+    p.wait(timeout=max(0.1, remaining))
+    return bytes(out), bytes(err)
+
+
 def run_bounded(argv, timeout, stdin_bytes=None, capture=True, interactive=False,
-                log=None):
-    """Run argv in its own process group; kill and reap the GROUP on timeout or
-    interruption. Returns (rc, stdout_bytes, stderr_bytes).
+                log=None, max_stdout=DEFAULT_MAX_STDOUT, max_stderr=DEFAULT_MAX_STDERR):
+    """Run argv in its own process group; kill and reap the GROUP on timeout,
+    interruption OR an output-limit breach. Returns (rc, stdout_bytes, stderr_bytes).
 
     ``interactive=True`` lends the controlling terminal's foreground to the child's
     group for the duration, so a child that reads /dev/tty (an ssh password prompt)
     is not stopped by SIGTTIN. stdin is /dev/null, so no secret can travel through
     our pipes; the password is typed directly into the terminal by the operator and
     is never captured or logged.
+
+    Output is drained incrementally under ``max_stdout`` / ``max_stderr`` byte
+    ceilings; exceeding either terminates and reaps the child group and raises
+    OutputLimitExceeded.
     """
     kwargs = dict(_OWN_GROUP)
     if capture:
@@ -348,16 +462,22 @@ def run_bounded(argv, timeout, stdin_bytes=None, capture=True, interactive=False
         kwargs.update(stdin=subprocess.DEVNULL)
     p = subprocess.Popen(argv, **kwargs)
     handover = None
+    out = b""
+    err = b""
     try:
         if interactive:
             handover = _TerminalHandover(p.pid, log)
             handover.__enter__()
-        out, err = p.communicate(input=stdin_bytes if capture else None, timeout=timeout)
+        if capture:
+            out, err = _drain_bounded(p, timeout, stdin_bytes, max_stdout, max_stderr)
+        else:
+            p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         _terminate_and_reap(p)
         raise RemoteTimeout("command exceeded %ss and was killed: %s" % (timeout, argv[0]))
     except BaseException:
-        # KeyboardInterrupt / any other exception: never leak the child group.
+        # KeyboardInterrupt, an output-limit breach, or any other exception:
+        # never leak the child group.
         _terminate_and_reap(p)
         raise
     finally:
@@ -381,6 +501,12 @@ def classify_ssh_failure(stderr_text):
         return TransportUnreachableError(
             "management address unreachable: %s" % stderr_text.strip())
     return TransportError("ssh failed: %s" % (stderr_text.strip() or "unknown error"))
+
+
+def _oneline(raw):
+    """A bounded single-line rendering of captured bytes, for error messages."""
+    text = (raw or b"").decode("utf-8", "replace")
+    return " ".join(text.split())[:200]
 
 
 class SSHSession:
@@ -412,6 +538,8 @@ class SSHTransport:
                  watchdog_selftest_bound=3,
                  verify_artifact=True,
                  interactive_auth=None,
+                 max_stdout_bytes=DEFAULT_MAX_STDOUT,
+                 max_stderr_bytes=DEFAULT_MAX_STDERR,
                  log=None):
         self.host = host
         self.user = user
@@ -428,6 +556,8 @@ class SSHTransport:
         self.watchdog_selftest_bound = watchdog_selftest_bound
         self.verify_artifact = verify_artifact
         self.interactive_auth = interactive_auth   # None -> auto-detect a controlling tty
+        self.max_stdout_bytes = int(max_stdout_bytes)
+        self.max_stderr_bytes = int(max_stderr_bytes)
         self.log = log or (lambda *a: None)
 
         self._ctrl_dir = None
@@ -505,7 +635,9 @@ class SSHTransport:
                      "unavailable (a key in authorized_keys is required for unattended use)")
         try:
             rc, _out, err = run_bounded(argv, self.connect_timeout + 20,
-                                        interactive=interactive, log=self.log)
+                                        interactive=interactive, log=self.log,
+                                        max_stdout=self.max_stdout_bytes,
+                                        max_stderr=self.max_stderr_bytes)
         except BaseException:
             self._release_master_resources()
             raise
@@ -521,7 +653,9 @@ class SSHTransport:
         if stdin_bytes is None:
             argv += ["-n"]
         argv += ["-o", "ControlPath=%s" % self._ctrl_path, self._target(), cmd]
-        rc, out, err = run_bounded(argv, timeout, stdin_bytes=stdin_bytes)
+        rc, out, err = run_bounded(argv, timeout, stdin_bytes=stdin_bytes,
+                                   max_stdout=self.max_stdout_bytes,
+                                   max_stderr=self.max_stderr_bytes)
         if rc == 255:
             raise classify_ssh_failure(err.decode("utf-8", "replace"))
         return rc, out, err
@@ -554,14 +688,32 @@ class SSHTransport:
         if rc != 0 or kat != OPENSSL_KAT_ABC:
             raise TransportError("openssl SHA-256 known-answer test FAILED (got %r)" % kat)
 
-        # 2. required-tool hard gate
+        # 2. required-tool hard gate: require rc==0 AND exactly one well-formed
+        #    marker line. A nonzero exit, a missing marker, several markers or an
+        #    unrecognised marker all stop provisioning BEFORE any remote state is
+        #    created or anything is executed.
         rc, out, err = self._rsh(TOOLS_CMD, self.connect_timeout + 10)
-        miss = ""
-        for line in out.decode("utf-8", "replace").splitlines():
-            if line.startswith("MISSING:"):
-                miss = line[len("MISSING:"):].strip()
-        if miss:
+        if rc != 0:
+            raise TransportError(
+                "required-tool probe failed (rc=%d): %s - hard stop" % (rc, _oneline(err)))
+        markers = [ln.strip() for ln in out.decode("utf-8", "replace").splitlines()
+                   if ln.strip()]
+        if len(markers) != 1:
+            raise TransportError(
+                "required-tool probe returned %d marker line(s), expected exactly 1 "
+                "- ambiguous, hard stop" % len(markers))
+        marker = markers[0]
+        if marker == "TOOLS_OK":
+            pass
+        elif marker.startswith("TOOLS_MISSING:"):
+            miss = marker[len("TOOLS_MISSING:"):].strip()
+            if not miss:
+                raise TransportError(
+                    "required-tool probe reported an empty MISSING list - malformed, hard stop")
             raise TransportError("required router tools MISSING: %s - hard stop" % miss)
+        else:
+            raise TransportError(
+                "required-tool probe returned an unrecognised result %r - hard stop" % marker)
 
         # 3. exclusive private directory (ownership tracking)
         rc, _out, _err = self._rsh('mkdir -m 700 "%s" && [ -d "%s" ]' % (rd, rd),
@@ -599,26 +751,54 @@ class SSHTransport:
 
     def _watchdog_selftest(self, session):
         """Run a long job under the SAME watchdog shape used for the reporter and
-        require that it is killed at the bound. A watchdog that does not bound is
-        a hard stop — the reporter must never run unbounded."""
+        require that the watchdog TIMER killed it at the bound.
+
+        Three independent things are required, and none is sufficient alone: the
+        intended SIGKILL status (137), positive evidence the watchdog timer fired
+        (a marker the watchdog writes immediately before it kills), and an elapsed
+        time within tolerance of the bound. A bare status >= 128 would also accept
+        an unrelated crash (e.g. SIGSEGV 139), and a printed success line proves
+        nothing about the timer.
+        """
         bound = self.watchdog_selftest_bound
         cmd = selftest_cmd(session.remote_dir, bound)
+        started = time.monotonic()
         rc, out, err = self._rsh(cmd, bound + self.connect_timeout + 10)
+        elapsed = time.monotonic() - started
         if rc != 0:
             raise TransportError(
-                "watchdog self-test did not complete (rc=%d): %s"
-                % (rc, err.decode("utf-8", "replace").strip()[:200]))
-        m = re.search(r"selftest_exit=(\d+)", out.decode("utf-8", "replace"))
-        if not m:
-            raise TransportError("watchdog self-test produced no result")
-        st = int(m.group(1))
+                "watchdog self-test did not complete (rc=%d): %s" % (rc, _oneline(err)))
+        text = out.decode("utf-8", "replace")
+        exits = re.findall(r"selftest_exit=(\d+)", text)
+        fired = re.findall(r"selftest_wd_fired=([01])", text)
+        if len(exits) != 1 or len(fired) != 1:
+            raise TransportError(
+                "watchdog self-test result is missing or ambiguous "
+                "(exit markers=%d, fired markers=%d)" % (len(exits), len(fired)))
+        st = int(exits[0])
+        fired_flag = int(fired[0])
         if st == 0:
             raise TransportError(
                 "watchdog self-test FAILED: the long job completed instead of being "
                 "killed at %ss - the remote bound is NOT proven - refusing to run" % bound)
-        if st < _KILLED_FROM:
-            raise TransportError("watchdog self-test FAILED: unexpected status %d" % st)
-        self.log("watchdog self-test OK: long job killed at %ss (status %d)" % (bound, st))
+        if st != _WD_SIGKILL_STATUS:
+            raise TransportError(
+                "watchdog self-test FAILED: unexpected termination status %d "
+                "(expected %d from the watchdog's SIGKILL) - refusing to run"
+                % (st, _WD_SIGKILL_STATUS))
+        if fired_flag != 1:
+            raise TransportError(
+                "watchdog self-test FAILED: no evidence the watchdog timer fired "
+                "(the job died from something other than the bound) - refusing to run")
+        lower = max(0.0, bound - _SELFTEST_LOWER_TOL)
+        upper = bound + _SELFTEST_UPPER_TOL
+        if not (lower <= elapsed <= upper):
+            raise TransportError(
+                "watchdog self-test FAILED: the job ended after %.2fs, outside the "
+                "expected %ss bound (tolerance %.1f-%.1fs) - refusing to run"
+                % (elapsed, bound, lower, upper))
+        self.log("watchdog self-test OK: long job killed at %ss "
+                 "(status %d, timer fired, %.2fs)" % (bound, st, elapsed))
 
     def collect_sample(self, session, timeout=None):
         """Run the reporter once under the remote watchdog. Returns raw JSON bytes."""

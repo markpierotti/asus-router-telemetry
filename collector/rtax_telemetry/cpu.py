@@ -38,6 +38,12 @@ Degenerate cases are reported EXPLICITLY, never silently as 0:
 `interval_seconds` is the LOCAL MONOTONIC delta between the two samples; it is
 recorded for provenance and is never used to derive the percentage (the counters
 already carry the elapsed time).
+
+A truncated cpu_stat block carries an explicit `"_truncated": true` marker (the
+reporter could not serialise every per-CPU entry within its own bound). The marker
+is reported in the derived block and is NEVER treated as a counter, so the
+aggregate — which the kernel always lists first and the reporter therefore keeps —
+is still compared honestly and no counter is fabricated.
 """
 
 CPU_FIELDS = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal")
@@ -92,6 +98,7 @@ def compare(prev_stat, cur_stat, *, reboot=False, interval_seconds=None):
                     "already accounts them inside user/nice"),
         "interval_seconds": interval_seconds,
         "state": "first" if prev_stat is None else None,
+        "truncated": bool(isinstance(cur_stat, dict) and cur_stat.get("_truncated") is True),
         "aggregate": None,
         "per_cpu": {},
     }
@@ -106,7 +113,8 @@ def compare(prev_stat, cur_stat, *, reboot=False, interval_seconds=None):
         return out
 
     states = []
-    for key in sorted(cur_stat):
+    # "_truncated" is a marker, not a CPU entry: never compared as a counter.
+    for key in sorted(k for k in cur_stat if k != "_truncated"):
         pc = _pair(prev_stat.get(key), cur_stat.get(key))
         if key == "cpu":
             out["aggregate"] = pc

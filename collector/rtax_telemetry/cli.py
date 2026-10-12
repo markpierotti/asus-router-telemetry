@@ -28,10 +28,17 @@ from .core import (
 from .errors import LockHeld, TelemetryError, TransportError
 from .mock import ScenarioTransport, SCENARIOS
 from .status import render_status, sample_age_seconds
-from .store import Store
+from .store import (
+    DEFAULT_MAX_SAMPLE_BYTES,
+    DEFAULT_RETAIN_OUTCOME_BYTES,
+    DEFAULT_RETAIN_SAMPLE_BYTES,
+    Store,
+)
 from .transport import (
     DEFAULT_ARTIFACT,
     DEFAULT_KNOWN_HOSTS,
+    DEFAULT_MAX_STDERR,
+    DEFAULT_MAX_STDOUT,
     EXPECT_ARTIFACT_SHA,
     EXPECT_KNOWN_HOSTS_SHA,
     SSHTransport,
@@ -90,6 +97,24 @@ def acquire_lock(store):
     return fd
 
 
+def release_lock(fd=None):
+    """Release the data-directory lock. Scoped release for ``finally`` paths."""
+    global _lock_fd
+    fd = _lock_fd if fd is None else fd
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    if fd is _lock_fd:
+        _lock_fd = None
+
+
 # ------------------------------------------------------------------ transport
 def build_transport(args, cfg):
     if args.transport == "mock":
@@ -110,6 +135,8 @@ def build_transport(args, cfg):
         watchdog_selftest=cfg_get(args, cfg, "watchdog_selftest", True),
         watchdog_selftest_bound=cfg_get(args, cfg, "watchdog_selftest_bound", 3),
         interactive_auth=cfg_get(args, cfg, "interactive_auth", None),
+        max_stdout_bytes=cfg_get(args, cfg, "max_stdout_bytes", DEFAULT_MAX_STDOUT),
+        max_stderr_bytes=cfg_get(args, cfg, "max_stderr_bytes", DEFAULT_MAX_STDERR),
         log=log,
     )
     return tr, "%s@%s" % (tr.user, tr.host)
@@ -120,6 +147,11 @@ def build_store(args, cfg):
         cfg_get(args, cfg, "data_dir", DEFAULT_DATA_DIR),
         retain_samples=cfg_get(args, cfg, "retain_samples", 1440),
         retain_outcomes=cfg_get(args, cfg, "retain_outcomes", 5000),
+        retain_sample_bytes=cfg_get(args, cfg, "retain_sample_bytes",
+                                    DEFAULT_RETAIN_SAMPLE_BYTES),
+        retain_outcome_bytes=cfg_get(args, cfg, "retain_outcome_bytes",
+                                     DEFAULT_RETAIN_OUTCOME_BYTES),
+        max_sample_bytes=cfg_get(args, cfg, "max_sample_bytes", DEFAULT_MAX_SAMPLE_BYTES),
     )
 
 
@@ -161,6 +193,7 @@ def cmd_collect(args):
                        and attempt.get("cleanup_ok", True)) else 1
     finally:
         collector.close()
+        release_lock()          # scoped release: always drop the data-dir lock
     # A cleanup failure is surfaced separately and never masks an original failure.
     if collector.cleanup_error:
         log("cleanup: SEPARATE FAILURE: %s" % collector.cleanup_error)
@@ -238,7 +271,17 @@ def cmd_status(args):
 def cmd_prune(args):
     cfg = load_config(args.data_dir)
     store = build_store(args, cfg)
-    n = store.prune()
+    # prune REWRITES the outcomes log and unlinks samples: it must take the SAME
+    # data-directory lock as collection, so it cannot race a live collector.
+    try:
+        acquire_lock(store)
+    except LockHeld as e:
+        log("FATAL: %s" % e)
+        return 3
+    try:
+        n = store.prune()
+    finally:
+        release_lock()
     log("pruned %d record(s); samples now %d, outcomes now %d" % (
         n, store.sample_count(), len(store.outcomes())))
     return 0
@@ -303,6 +346,12 @@ def add_common(p):
                    help="data directory (default: %s)" % DEFAULT_DATA_DIR)
     p.add_argument("--retain-samples", type=int, default=None)
     p.add_argument("--retain-outcomes", type=int, default=None)
+    p.add_argument("--retain-sample-bytes", type=int, default=None,
+                   help="byte budget for retained samples (default %d)" % DEFAULT_RETAIN_SAMPLE_BYTES)
+    p.add_argument("--retain-outcome-bytes", type=int, default=None,
+                   help="byte budget for the outcomes log (default %d)" % DEFAULT_RETAIN_OUTCOME_BYTES)
+    p.add_argument("--max-sample-bytes", type=int, default=None,
+                   help="per-write sample budget (default %d)" % DEFAULT_MAX_SAMPLE_BYTES)
     p.add_argument("--open-after", type=int, default=None)
     p.add_argument("--resolve-after", type=int, default=None)
 
@@ -327,6 +376,10 @@ def add_transport(p):
                    default=None, help="force interactive terminal authentication")
     p.add_argument("--no-interactive-auth", dest="interactive_auth", action="store_false",
                    default=None, help="never take over the terminal (key auth only)")
+    p.add_argument("--max-stdout-bytes", type=int, default=None,
+                   help="device stdout byte ceiling (default %d)" % DEFAULT_MAX_STDOUT)
+    p.add_argument("--max-stderr-bytes", type=int, default=None,
+                   help="device stderr byte ceiling (default %d)" % DEFAULT_MAX_STDERR)
 
 
 def build_parser():

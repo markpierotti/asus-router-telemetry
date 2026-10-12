@@ -1,6 +1,6 @@
 # Foreground telemetry collector
 
-Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.2.0. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
+Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.3.0. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
 
 Requires macOS or a POSIX host with Python 3.11+ and OpenSSH for live use. It remains a foreground process; it creates no scheduled jobs, services or startup hooks.
 
@@ -43,7 +43,15 @@ CPU utilisation uses `100 * (delta_total - delta_idle) / delta_total`, where idl
 
 Three failed attempts open a collection incident; two successes resolve it. An unreachable SSH address does not establish a device outage. Incidents and history remain local. No external notifications, automatic remediation or model calls are implemented.
 
-Retention defaults to 1440 sample files and 5000 outcomes. `status`, `prune`, `validate FILE` and `selftest` are available. Exit codes: 0 success, 1 collection failure, 3 overlap lock, 5 cleanup failure after successful collection, 130 interrupted loop. Cleanup failure is reported separately while preserving an original collection failure.
+Retention is bounded in two dimensions: `retain_samples` (default 1440) and `retain_outcomes` (default 5000) count records, and `retain_sample_bytes` / `retain_outcome_bytes` cap the bytes kept on disk. A single sample larger than `max_sample_bytes` is refused with a classified `storage_error`, never silently truncated. `status`, `prune`, `validate FILE` and `selftest` are available. `prune` takes the same data-directory lock as collection, so it cannot race a live collector (exit 3 on conflict). Exit codes: 0 success, 1 collection failure, 3 overlap lock, 5 cleanup failure after successful collection, 130 interrupted loop. Cleanup failure is reported separately while preserving an original collection failure.
+
+## Containment and outcome classes
+
+Device output is drained incrementally under explicit byte ceilings (`max_stdout_bytes`, default 1 MiB; `max_stderr_bytes`, default 256 KiB) enforced *while receiving*, before anything is fully buffered, decoded or parsed; a stream that exceeds its ceiling terminates and reaps the child group and is classified `output_overflow`. The parser also refuses a document larger than 1 MiB and one nested beyond 64 levels (a string- and escape-aware scan), and converts `RecursionError` into a normal `malformed_data` outcome, so a bad response records a failed attempt and the loop continues.
+
+Provisioning gates are hard stops: the required-tool probe must exit 0 and return exactly one well-formed marker showing no missing tools, and the watchdog self-test must show the watchdog's own SIGKILL status, positive evidence its timer fired, and an elapsed time within tolerance of the bound — a crash such as SIGSEGV (139), a bare status 137, or a printed success line is not accepted. All of these stop provisioning before any remote directory is created or anything is executed.
+
+Full outcome taxonomy: `success` · `malformed_data` · `schema_invalid` · `timeout` · `reporter_failure` · `ssh_auth_failure` · `ssh_hostkey_mismatch` · `unreachable` · `artifact_mismatch` · `transport_error` · `output_overflow` · `storage_error`.
 
 ## Validation boundary
 

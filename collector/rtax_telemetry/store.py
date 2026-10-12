@@ -7,8 +7,18 @@ Layout under the data directory (default: the project's ``data/`` dir):
     state.json                              counters + incident + last attempt/sample
     .lock                                   flock held for the life of a run
 
-Retention is bounded and configurable (requirement 5): the newest N samples and
-the newest N outcome records are kept, older ones are pruned.
+Retention is bounded in BOTH dimensions (requirement 5 / the storage finding):
+
+  * record counts  — the newest N samples and N outcome records are kept; and
+  * byte budgets   — the retained samples and the outcomes log are each trimmed
+                     until they fit their byte ceiling, so a device cannot fill the
+                     disk by sending large-but-schema-valid documents.
+
+A single sample is refused (``QuotaExceeded``) when it would exceed the per-write
+budget, so a write failure is explicit rather than a silent truncation.
+
+Temporary files use a unique suffix (pid + random), so two writers sharing a data
+directory cannot collide on a fixed ``*.tmp`` name and lose records.
 
 The raw artifact bytes are NEVER stored — only the reporter's JSON output.
 """
@@ -16,7 +26,15 @@ The raw artifact bytes are NEVER stored — only the reporter's JSON output.
 import datetime
 import json
 import os
+import secrets
 from pathlib import Path
+
+from .errors import QuotaExceeded
+
+# Defaults; all are configurable through the constructor / CLI / config.json.
+DEFAULT_RETAIN_SAMPLE_BYTES = 256 * 1024 * 1024     # 256 MiB of retained samples
+DEFAULT_RETAIN_OUTCOME_BYTES = 32 * 1024 * 1024     # 32 MiB of outcomes
+DEFAULT_MAX_SAMPLE_BYTES = 2 * 1024 * 1024          # 2 MiB for one sample write
 
 
 def utc_iso(ts):
@@ -29,8 +47,23 @@ def utc_stamp(ts):
         "%Y%m%dT%H%M%S.%fZ")
 
 
+def _tmp_suffix():
+    """A per-writer unique suffix so two writers cannot share a temp filename."""
+    return "%d.%s" % (os.getpid(), secrets.token_hex(4))
+
+
+def _size(path):
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 class Store:
-    def __init__(self, data_dir, *, retain_samples=1440, retain_outcomes=5000):
+    def __init__(self, data_dir, *, retain_samples=1440, retain_outcomes=5000,
+                 retain_sample_bytes=DEFAULT_RETAIN_SAMPLE_BYTES,
+                 retain_outcome_bytes=DEFAULT_RETAIN_OUTCOME_BYTES,
+                 max_sample_bytes=DEFAULT_MAX_SAMPLE_BYTES):
         self.dir = Path(os.path.expanduser(str(data_dir)))
         self.samples_dir = self.dir / "samples"
         self.outcomes_path = self.dir / "outcomes.jsonl"
@@ -38,6 +71,9 @@ class Store:
         self.lock_path = self.dir / ".lock"
         self.retain_samples = int(retain_samples)
         self.retain_outcomes = int(retain_outcomes)
+        self.retain_sample_bytes = int(retain_sample_bytes)
+        self.retain_outcome_bytes = int(retain_outcome_bytes)
+        self.max_sample_bytes = int(max_sample_bytes)
 
     # ------------------------------------------------------------ lifecycle
     def ensure(self):
@@ -52,10 +88,15 @@ class Store:
     def save_sample(self, obj, *, when=None):
         self.ensure()
         ts = time_now() if when is None else when
+        payload = json.dumps(obj, separators=(",", ":"), sort_keys=False).encode("utf-8")
+        if len(payload) > self.max_sample_bytes:
+            raise QuotaExceeded(
+                "sample is %d bytes, over the %d-byte per-write budget"
+                % (len(payload), self.max_sample_bytes))
         path = self.samples_dir / (utc_stamp(ts) + ".json")
-        tmp = path.with_suffix(".json.tmp")
-        with open(tmp, "w") as fh:
-            json.dump(obj, fh, separators=(",", ":"), sort_keys=False)
+        tmp = path.with_suffix(".json.%s.tmp" % _tmp_suffix())
+        with open(tmp, "wb") as fh:
+            fh.write(payload)
         os.replace(tmp, path)
         self.prune_samples()
         return path
@@ -109,7 +150,7 @@ class Store:
 
     def write_state(self, state):
         self.ensure()
-        tmp = self.state_path.with_suffix(".json.tmp")
+        tmp = self.state_path.with_suffix(".json.%s.tmp" % _tmp_suffix())
         with open(tmp, "w") as fh:
             json.dump(state, fh, indent=2, sort_keys=True)
             fh.write("\n")
@@ -117,31 +158,56 @@ class Store:
 
     # ------------------------------------------------------------- retention
     def prune_samples(self):
+        """Trim oldest samples until BOTH the record count and byte budget hold."""
         paths = self.sample_paths()
-        excess = len(paths) - self.retain_samples
         removed = 0
+        excess = len(paths) - self.retain_samples
         for p in paths[:max(0, excess)]:
             try:
                 p.unlink()
                 removed += 1
             except OSError:
                 pass
+        paths = self.sample_paths()
+        total = sum(_size(p) for p in paths)
+        i = 0
+        while total > self.retain_sample_bytes and i < len(paths):
+            try:
+                total -= _size(paths[i])
+                paths[i].unlink()
+                removed += 1
+            except OSError:
+                pass
+            i += 1
         return removed
 
     def prune_outcomes(self):
+        """Trim oldest outcome lines until count and byte budgets both hold.
+
+        The rewrite uses a unique temporary name, so a concurrent append in another
+        process cannot share (and then lose) a fixed ``*.tmp`` file.
+        """
         if not self.outcomes_path.is_file():
             return 0
         with open(self.outcomes_path) as fh:
             lines = [ln for ln in fh if ln.strip()]
-        excess = len(lines) - self.retain_outcomes
-        if excess <= 0:
+        sizes = [len(ln.encode("utf-8")) for ln in lines]
+        total = sum(sizes)
+        i = 0
+        while i < len(lines) - self.retain_outcomes:
+            total -= sizes[i]
+            i += 1
+        while total > self.retain_outcome_bytes and i < len(lines):
+            total -= sizes[i]
+            i += 1
+        if i <= 0:
             return 0
-        keep = lines[excess:]
-        tmp = self.outcomes_path.with_suffix(".jsonl.tmp")
+        keep = lines[i:]
+        tmp = self.outcomes_path.with_suffix(".jsonl.%s.tmp" % _tmp_suffix())
         with open(tmp, "w") as fh:
             fh.writelines(keep)
         os.replace(tmp, self.outcomes_path)
-        return excess
+        return i
 
     def prune(self):
         return self.prune_samples() + self.prune_outcomes()
