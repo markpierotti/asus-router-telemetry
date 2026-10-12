@@ -111,7 +111,8 @@ class Store:
         # relative sample path: the state pointer could then only be reopened from the
         # same working directory, and from anywhere else the predecessor silently
         # became `first`. `resolve_sample_path()` below keeps OLDER relative records
-        # readable too.
+        # readable too - by resolving them inside THIS store, never against the
+        # working directory.
         self.dir = Path(os.path.abspath(os.path.expanduser(str(data_dir))))
         self.samples_dir = self.dir / "samples"
         self.outcomes_path = self.dir / "outcomes.jsonl"
@@ -239,57 +240,91 @@ class Store:
     def last_sample(self):
         """The most recent accepted sample, or None.
 
-        Resolved through ``state.last_valid_sample.path`` first: sample FILE NAMES
-        are wall-clock timestamps, so "the lexicographically last file" picks the
-        wrong sample after a clock step and lets a future-dated file win. The
-        state pointer records which sample was actually last ACCEPTED. Filename
-        order remains the fallback when there is no usable state.
+        When state NAMES a last accepted sample (``state.last_valid_sample.path``)
+        that pointer is AUTHORITATIVE: the sample it names is returned, or None when
+        that file cannot be located or read. It is never replaced by "the
+        lexicographically last file": sample FILE NAMES are wall-clock timestamps,
+        so filename order picks the wrong sample after a clock step and lets a
+        future-dated file win - and substituting one for a state-selected sample
+        that has gone missing would present a different sample as the last accepted.
+
+        Filename order is used ONLY when state names no sample at all (no
+        ``state.json`` yet, or one that was quarantined): there is then no selection
+        to preserve. That fallback serves the ``status`` display; the collector's
+        own predecessor lookup never uses it.
         """
-        for candidate in (self._state_sample_path(), self.last_sample_path()):
-            if not candidate:
-                continue
-            try:
-                with open(candidate) as fh:
-                    doc = json.load(fh)
-            except (OSError, ValueError):
-                continue
-            if isinstance(doc, dict):
-                return doc
-        return None
+        recorded, located = self._state_sample_pointer()
+        candidate = located if recorded else self.last_sample_path()
+        if not candidate:
+            return None
+        try:
+            with open(candidate) as fh:
+                doc = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        return doc if isinstance(doc, dict) else None
 
     def resolve_sample_path(self, path):
-        """Locate a RECORDED sample path independent of the current working dir.
+        """Locate a RECORDED sample path. Deterministic; the CWD is never consulted.
 
-        A record may carry a RELATIVE path (older versions persisted the path exactly
-        as given, so a relative `--data-dir` produced e.g.
-        ``data-acceptance-1.5.2.l40vi7bh/samples/2026...json``). That string can only
-        be reopened from the working directory it was written in; the SAME file is
-        reached CWD-independently by resolving its basename inside THIS store's own
-        samples directory. The state-selected sample is preserved - this NEVER
-        substitutes the lexicographically newest file, which is the wrong predecessor
-        after a clock step.
+        Two kinds of record exist and each has exactly ONE meaning:
 
-        Returns an existing path (as an absolute string) or None.
+          * an ABSOLUTE path - everything written since the data directory became
+            absolute at construction - names one file whatever the working directory
+            is. It is honoured VERBATIM: never re-anchored, and never replaced by a
+            same-named file somewhere else. If that file is gone the answer is None.
+          * a RELATIVE path - written by older versions, which persisted the data
+            directory exactly as the operator spelled it, e.g.
+            ``data-acceptance-1.5.2.l40vi7bh/samples/2026...json`` - belongs to the
+            store whose state names it. It resolves to the recorded FILE NAME inside
+            THIS store's own samples directory, and nowhere else.
+
+        The relative string is deliberately NOT tried against the current working
+        directory. Doing that first, as the previous revision did, let a file at the
+        same relative path under whatever directory the collector happened to be
+        started from OVERRIDE the state-selected sample; with the same transport and
+        host the source guard cannot tell the two apart, so the result was a CPU
+        comparison against another dataset rather than a null first-sample value.
+
+        The recorded file name is preserved in both cases. Nothing here ever chooses
+        a sample by file-name order, and nothing is rewritten: a pointer whose file
+        is missing resolves to None and the caller reports it.
+
+        Returns an existing regular file (as an absolute string) or None.
         """
         if not path:
             return None
-        candidates = [str(path)]
-        if not os.path.isabs(str(path)):
-            candidates.append(str(self.samples_dir / os.path.basename(str(path))))
-        for cand in candidates:
-            if os.path.isfile(cand):
-                return os.path.abspath(cand)
+        recorded = str(path)
+        if os.path.isabs(recorded):
+            candidate = recorded
+        else:
+            name = os.path.basename(recorded)
+            if not name:
+                return None
+            candidate = str(self.samples_dir / name)
+        if os.path.isfile(candidate):
+            return os.path.abspath(candidate)
         return None
 
-    def _state_sample_path(self):
+    def _state_sample_pointer(self):
+        """``(recorded, located)`` for ``state.last_valid_sample.path``.
+
+        ``recorded`` is the pointer exactly as state holds it, or None when state
+        names no sample; ``located`` is where that sample is on disk, or None. The
+        two are kept apart because "state names no sample" and "state names a sample
+        that cannot be found" are different facts.
+        """
         try:
             state = self.load_state()
         except Exception:                               # noqa: BLE001
-            return None
+            return None, None
         meta = state.get("last_valid_sample") if isinstance(state, dict) else None
         if isinstance(meta, dict) and meta.get("path"):
-            return self.resolve_sample_path(meta["path"])
-        return None
+            return meta["path"], self.resolve_sample_path(meta["path"])
+        return None, None
+
+    def _state_sample_path(self):
+        return self._state_sample_pointer()[1]
 
     def last_sample_path(self):
         """The path of the newest sample file, or None (no read of its contents)."""

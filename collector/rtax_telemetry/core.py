@@ -19,6 +19,12 @@ Outcome records carry the REMOTE STATE FACTS as well as the verdict:
                         removed
     cleanup_detail      what could not be confirmed
 
+A directory whose removal is not confirmed is ALSO queued in
+``pending_cleanup.jsonl`` at the moment that becomes known - inside the attempt
+that learned it, not at the end of the run. ``cleanup_error`` is a per-attempt
+field: the next attempt resets it, and a run that recovers and then closes cleanly
+writes no ``teardown`` record, so the end of the run is too late to name the path.
+
 Incident rules (requirement 9): `open_after` consecutive failed attempts open a
 collection incident; `resolve_after` consecutive successful attempts clear it.
 Incidents are local state only — nothing is notified, nothing is remediated.
@@ -29,7 +35,6 @@ retry forever against an endpoint whose identity is not established.
 """
 
 import json
-import os
 import time
 
 from . import COLLECTOR_VERSION, SAMPLE_SCHEMA, STATE_SCHEMA
@@ -195,6 +200,8 @@ class Collector:
         self._start_failure = None      # what transport.start() raised THIS attempt
         self._held_cancel = None        # a cancellation waiting for the attempt record
         self.cleanup_error = None       # set when a teardown fails; surfaced by the CLI
+        self._cleanup_queued = False    # the directory `cleanup_error` is about has
+                                        # been written to pending_cleanup.jsonl
         self.cleanup_interrupted = False  # teardown was cancelled; removal UNCONFIRMED
         self.lifecycle_error = None     # master shutdown could not be confirmed
         self.persistence_error = None   # set when evidence could NOT be written
@@ -275,6 +282,8 @@ class Collector:
                          "is UNCONFIRMED" % type(e).__name__))
                     if cancelled:
                         self.cleanup_interrupted = True
+                # a NEW uncertainty, about the session just dropped: not queued yet
+                self._cleanup_queued = False
                 self.log("cleanup: %s" % self.cleanup_error)
             if cancelled:
                 raise
@@ -326,6 +335,12 @@ class Collector:
         records and two ``pending_cleanup`` entries for the SAME directory. Genuine,
         separate failure events (an attempt's pending-cleanup entry, a different
         directory) are unaffected: they are written elsewhere and are not deduplicated.
+
+        The teardown record is a FINAL-CLOSE record: it describes what was still
+        unconfirmed when the run ended. A directory that an EARLIER attempt could not
+        confirm removed is not repeated in it - that directory was queued in
+        ``pending_cleanup.jsonl`` by the attempt that learned of it, and a run that
+        recovered and closes cleanly writes no teardown record at all.
         """
         try:
             self._drop_session()
@@ -334,6 +349,10 @@ class Collector:
                     and not self._teardown_recorded):
                 self._teardown_recorded = True
                 self._note_teardown_failure()
+            # Independent of the once-per-run guard above: a directory this close
+            # could not confirm removed is queued even when the teardown RECORD has
+            # already been written. A no-op whenever it is queued already.
+            self._queue_unconfirmed_directory()
 
     def _note_teardown_failure(self):
         """Persist anything the teardown could NOT confirm — durably, in three places.
@@ -343,7 +362,8 @@ class Collector:
         entirely. The failure is therefore also appended to the append-only outcome
         log as an explicit ``teardown`` record, and — when a REMOTE DIRECTORY's
         removal is the thing that is unconfirmed — the exact path is written to
-        ``pending_cleanup.jsonl`` so a later read-only reconciliation can find it.
+        ``pending_cleanup.jsonl`` so a later read-only reconciliation can find it
+        (once: an attempt that already queued it is not queued again here).
 
         A master-shutdown failure alone does NOT create a pending-directory entry: the
         directory may be gone and what is unconfirmed is the *master*, so naming a
@@ -403,15 +423,12 @@ class Collector:
         except Exception as e:                      # noqa: BLE001
             problems.append("state not updated (%s)" % e)
 
-        if cleanup_detail:
-            self._record_pending_cleanup(remote_dir, ownership, cleanup_detail)
+        # The directory itself. Queued through the same once-only path the attempts
+        # use, so an attempt that already named it is not repeated at the final close.
+        self._queue_unconfirmed_directory()
 
         if problems:
-            merged = "; ".join(problems)
-            if self.persistence_error:
-                merged = "%s; %s" % (self.persistence_error, merged)
-            self.persistence_error = sanitize_detail(merged)
-            self.log("EVIDENCE NOT PERSISTED: %s" % self.persistence_error)
+            self._note_persistence_problem("; ".join(problems))
 
     # ------------------------------------------------------------- attempt
     def collect_once(self):
@@ -425,9 +442,15 @@ class Collector:
         ownership = "none"
         provision_cleanup_ok = None
         provision_cleanup_detail = None
-        self._start_failure = None      # per-attempt, like the three below
+        # BEFORE the per-attempt fields below are reset: a directory an earlier call
+        # left unconfirmed and that is not queued yet (a cancelled provision whose
+        # caller carried on instead of closing) is queued now. The reset must never
+        # be the thing that loses the path.
+        self._queue_unconfirmed_directory()
+        self._start_failure = None      # per-attempt, like the four below
         self._held_cancel = None
         self.cleanup_error = None       # per-attempt: reset so it reflects THIS attempt
+        self._cleanup_queued = False
         self.cleanup_interrupted = False
 
         try:
@@ -504,6 +527,16 @@ class Collector:
             outcome = OUTCOME_INTERNAL
             detail = "%s: %s" % (type(e).__name__, e)
             self._drop_session_in_attempt()
+
+        # A LIVE SESSION THIS ATTEMPT TORE DOWN AND COULD NOT CONFIRM REMOVED is
+        # queued for reconciliation HERE, with its exact path and ownership. This is
+        # the established-session counterpart of the provisioning case below: a link
+        # that drops under a working session fails the collection AND the removal
+        # that follows. The attempt record says so, but `cleanup_error` is reset by
+        # the next attempt, and once a later attempt has recovered, the final close
+        # is clean and writes no teardown record - so the end of the run cannot name
+        # the directory any more. Nothing is deleted and nothing is retried.
+        self._queue_unconfirmed_directory()
 
         # PROVISIONING FACTS ARE FOLDED IN FOR EVERY CLASSIFICATION, not only for
         # ProvisioningError. The transport attaches them to whichever exception ended
@@ -598,9 +631,10 @@ class Collector:
         before it lets ANY exception out, and attaches the result to that exception
         - a cancellation included. A cancelled attempt is not classified, so there
         is no attempt record to carry those facts; they are lifted into the SAME
-        teardown channel that a cancelled session teardown uses. ``close()`` then
-        writes the durable ``teardown`` record and, when a directory's removal is
-        unconfirmed, the pending-cleanup entry naming the exact path.
+        teardown channel that a cancelled session teardown uses. A directory whose
+        removal is unconfirmed is queued in ``pending_cleanup.jsonl`` HERE, naming
+        the exact path; ``close()`` then writes the durable ``teardown`` record
+        without queueing the directory a second time.
 
         Nothing is recorded when no facts are attached (a cancellation at the
         password prompt, before any remote name was chosen).
@@ -616,8 +650,60 @@ class Collector:
                        "was cancelled by %s)" % type(e).__name__)
             self.cleanup_interrupted = bool(
                 isinstance(facts, dict) and facts.get("cleanup_interrupted"))
+            # a NEW uncertainty, about the directory named just above. A cancelled
+            # attempt has no attempt record to carry it, so it is queued at once
+            # rather than left for a close() the caller may never reach.
+            self._cleanup_queued = False
             self.log("cleanup: %s" % self.cleanup_error)
+            self._queue_unconfirmed_directory()
         self._capture_transport_lifecycle()
+
+    def _queue_unconfirmed_directory(self):
+        """Queue the directory ``cleanup_error`` is about for reconciliation - ONCE.
+
+        ``cleanup_error`` always describes the removal of the directory held in
+        ``_last_session`` (the session just dropped, or the facts of a cancelled
+        provision); the two are set together. This writes that directory's exact
+        path and ownership to ``pending_cleanup.jsonl`` the first time it is called
+        after they are set, and does nothing on any later call, so the places that
+        can reach it - the attempt that learned of the failure, a cancelled
+        provision, the reset at the start of the next attempt, and the final close -
+        produce one entry per uncertain directory, not one per caller.
+
+        It is keyed on the EVENT, not on the path string: a later session that fails
+        to remove its own directory is a new uncertainty and is queued in its own
+        right. A master-only uncertainty never sets ``cleanup_error`` and so never
+        queues a directory.
+
+        The flag is set only once the write has RETURNED. A write that failed was
+        reported by ``_record_pending_cleanup`` (``persistence_error``) and is not
+        retried silently. A write cut short by a CANCELLATION leaves the flag clear,
+        so the final close tries again: one line too many in an append-only queue is
+        the lesser evil than a directory that was never queued.
+        """
+        if not self.cleanup_error or self._cleanup_queued:
+            return
+        session = self._last_session
+        self._record_pending_cleanup(getattr(session, "remote_dir", None),
+                                     getattr(session, "ownership", "unknown"),
+                                     self.cleanup_error)
+        self._cleanup_queued = True
+
+    def _note_persistence_problem(self, text):
+        """Report evidence that could NOT be written, keeping what was reported before.
+
+        ``persistence_error`` is never cleared during a run, and a later problem is
+        ADDED to it rather than replacing it: "the pending-cleanup entry for
+        /tmp/rt.x was not written" must not disappear because the attempt record
+        that followed could not be written either.
+        """
+        text = sanitize_detail(text)
+        if self.persistence_error and text not in self.persistence_error:
+            text = "%s; %s" % (self.persistence_error, text)
+        elif self.persistence_error:
+            text = self.persistence_error
+        self.persistence_error = sanitize_detail(text)
+        self.log("EVIDENCE NOT PERSISTED: %s" % self.persistence_error)
 
     def _record_pending_cleanup(self, remote_dir, ownership, detail):
         """Durably record a remote directory whose removal is NOT confirmed.
@@ -625,7 +711,8 @@ class Collector:
         Append-only evidence naming the exact path and how ownership was (or was
         not) established. NOTHING acts on this file automatically and nothing is
         ever deleted from it: automatic deletion of an uncertain directory is
-        deliberately not implemented. A failure to write it is REPORTED.
+        deliberately not implemented. A failure to write it is REPORTED, naming the
+        directory that could not be queued.
         """
         if not remote_dir:
             return
@@ -639,9 +726,8 @@ class Collector:
                 "automatic_deletion": False,
             })
         except Exception as e:                          # noqa: BLE001
-            self.persistence_error = sanitize_detail(
-                "pending-cleanup evidence not persisted (%s)" % e)
-            self.log("EVIDENCE NOT PERSISTED: %s" % self.persistence_error)
+            self._note_persistence_problem(
+                "pending-cleanup evidence for %s not persisted (%s)" % (remote_dir, e))
 
     def _persist_attempt(self, attempt, sample_meta):
         """Fold the attempt into state and append it to the outcome log.
@@ -663,8 +749,7 @@ class Collector:
         except Exception as e:                          # noqa: BLE001
             problems.append("outcome record not persisted (%s: %s)" % (type(e).__name__, e))
         if problems:
-            self.persistence_error = sanitize_detail("; ".join(problems))
-            self.log("EVIDENCE NOT PERSISTED: %s" % self.persistence_error)
+            self._note_persistence_problem("; ".join(problems))
 
     # -------------------------------------------------------------- derived
     def _predecessor(self):
@@ -687,19 +772,15 @@ class Collector:
         meta = state.get("last_valid_sample")
         if not isinstance(meta, dict) or not meta.get("path"):
             return None, None
-        # Locate the state-selected sample CWD-INDEPENDENTLY. A record written by an
-        # older version may carry a RELATIVE path, which could only be reopened from
-        # the working directory it was written in; resolving it against this store's
-        # samples directory keeps the SAME sample (never the lexicographically newest,
-        # which is the wrong predecessor after a clock step).
-        located = None
-        if hasattr(self.store, "resolve_sample_path"):
-            located = self.store.resolve_sample_path(meta["path"])
-        if located is None:
-            # Fall back to the recorded string verbatim (an absolute path, or a
-            # RELATIVE one opened from the directory it was written in).
-            if os.path.isfile(meta["path"]):
-                located = meta["path"]
+        # Locate the state-selected sample through the STORE, and only through it. A
+        # record written by an older version may carry a RELATIVE path; the store
+        # resolves that inside its own samples directory, keeping the SAME file name
+        # (never the lexicographically newest, which is the wrong predecessor after a
+        # clock step). There is deliberately NO second attempt here on the recorded
+        # string as given: for a relative record that is a lookup against the current
+        # working directory, where a same-path file from another dataset of the same
+        # host would be taken as the predecessor and compared against.
+        located = self.store.resolve_sample_path(meta["path"])
         if located is None:
             # Report it rather than silently deriving a `first`-sample state: the
             # predecessor pointer exists but the file it names could not be located.

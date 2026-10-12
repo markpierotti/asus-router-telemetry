@@ -436,7 +436,13 @@ def cmd_status(args):
     print(render_status(store, state, host=host, transport_name=args.transport))
     age = sample_age_seconds(store, time.time())
     if age is None:
-        print("  sample age          : (no valid sample yet)")
+        lv = state.get("last_valid_sample") if isinstance(state, dict) else None
+        if isinstance(lv, dict) and lv.get("path"):
+            # State NAMES a sample, so "no valid sample yet" would be untrue; and the
+            # newest file by name is deliberately not shown in its place.
+            print("  sample age          : (the sample named by state could not be read)")
+        else:
+            print("  sample age          : (no valid sample yet)")
     return 0
 
 
