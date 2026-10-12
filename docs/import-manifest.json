@@ -1,10 +1,13 @@
 {
   "date": "2026-10-12",
-  "note": "Second remediation revision: numeric containment (arbitrary-size JSON integers and overflowing exponents are classified, not crashed), strict JSON serialisation, and non-blocking time-bounded artifact transfer were applied to BOTH the private bench copy and this portable copy. Only deliberate configuration differences remain (bench target/user, data dir, artifact and known_hosts defaults, and the documentation addresses in tests).",
-  "reporter_source_sha256": "73ff16a943c2dbd5a6be12cfbe57b72d1d03425d9a19544241832dd817fff795",
-  "reporter_version": "1.0.3",
-  "collector_version": "1.4.0",
-  "bench_collector_version": "1.4.0",
+  "note": "Third remediation revision (findings F1-F9 from an independent static review, validated by a second agent). Applied to BOTH the private bench copy and this portable copy: parser containment and bounded/sanitised diagnostics, the reporter-to-collector null contract, a control-master liveness gate with no interactive fallback, recorded tri-state ownership with durable pending-cleanup evidence, SIGHUP/SIGTERM teardown in both modes, verified master shutdown, explicit boot identity, and reporter output-integrity/format fixes. Only deliberate configuration differences remain (bench target/user, data dir, artifact and known_hosts defaults and pinned digests, and config.example.json). The two trees' collector tests are now byte-identical, so no sanitized test addresses remain.",
+  "reporter_source_sha256": "09d4b4c35798fe4502d6cf23e4d83bab74d3d0de6a6a62f212bfb2a2ba706329",
+  "reporter_version": "1.0.4",
+  "collector_version": "1.5.0",
+  "bench_collector_version": "1.5.0",
+  "arm_artifact_sha256": "17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36",
+  "arm_artifact_note": "Reproduced IDENTICALLY by both the portable build-arm.sh and the bench build.sh (gcc 12.2.0 arm-linux-gnueabi, -static -std=c11 -march=armv7-a). OFFLINE-VALIDATED ONLY. The hardware-accepted artifact remains 3069b2bd3290ab3bb1db2d49b60e7e7c6a8e5090e4735537980c65926d2ce0eb (reporter v1.0.3).",
+  "reads_no_private_state": true,
   "adaptations": [
     "explicit operator configuration",
     "portable artifact/data paths",
@@ -12,6 +15,23 @@
     "require configured artifact digest",
     "expand operator home paths"
   ],
+  "differences": {
+    "rtax_telemetry/transport.py": [
+      "module docstring path",
+      "DEFAULT_ARTIFACT",
+      "DEFAULT_KNOWN_HOSTS",
+      "EXPECT_ARTIFACT_SHA",
+      "EXPECT_KNOWN_HOSTS_SHA"
+    ],
+    "rtax_telemetry/cli.py": [
+      "DEFAULT_DATA_DIR",
+      "DEFAULT_HOST",
+      "DEFAULT_USER"
+    ],
+    "config.example.json": [
+      "example vs bench values"
+    ]
+  },
   "files": {
     "collector.py": {
       "bench_sha256": "052f91251dee3799b95e0046bfda5fab2ddcd7ce4e5b1ec7a633123139652a97",
@@ -22,76 +42,80 @@
       "portable_sha256": "b1df88a18e992da98b4e3cc4b1e9c107bf8f5c3346abcaf9c5ffea8835383703"
     },
     "rtax_telemetry/__init__.py": {
-      "bench_sha256": "273971508c8b582015b2fde6c641ba9d6da85f54c2dd83fe22ae7ec499b9fb09",
-      "portable_sha256": "273971508c8b582015b2fde6c641ba9d6da85f54c2dd83fe22ae7ec499b9fb09"
+      "bench_sha256": "b3125c2e9ba9f27c1c4704c04cc17a5c508806234b78ba71595a5cad602e2e80",
+      "portable_sha256": "b3125c2e9ba9f27c1c4704c04cc17a5c508806234b78ba71595a5cad602e2e80"
     },
     "rtax_telemetry/cli.py": {
-      "bench_sha256": "ba2f31192ea7645cb781ee42b9c251a8fefd98a8ef0e6edf676dbc804e75a5b0",
-      "portable_sha256": "f1bc8d59fb8c63384e01db1ed13b3fc11950080e87b48b9abbc2359cf8f895bb"
+      "bench_sha256": "8010125fb71d7c421e7f1cc21dc0e12cbd1a1552b616ae3799e066cea59137ed",
+      "portable_sha256": "6238698bfaa616e8b8fc8376c9ac1f39dec8839392bbf429582d24a5b8cbbf49"
     },
     "rtax_telemetry/core.py": {
-      "bench_sha256": "9f621b2a920fe8459d3e76ed48e6224e666a05f45b0595e461e1e3cc1f8fed29",
-      "portable_sha256": "9f621b2a920fe8459d3e76ed48e6224e666a05f45b0595e461e1e3cc1f8fed29"
+      "bench_sha256": "c0758064771b1ee3455950b4cb2ba83871ecf3e9de592a0e64dca8555ef423d5",
+      "portable_sha256": "c0758064771b1ee3455950b4cb2ba83871ecf3e9de592a0e64dca8555ef423d5"
     },
     "rtax_telemetry/cpu.py": {
-      "bench_sha256": "f347982beb4badbe1909355133251ba22aa0c201276bee15c13d58bb9891a616",
-      "portable_sha256": "f347982beb4badbe1909355133251ba22aa0c201276bee15c13d58bb9891a616"
+      "bench_sha256": "c20379e0ef744bf1c5d6f2b4ed926dfa490a1b7fa0e9c622d7458a84e8b6545f",
+      "portable_sha256": "c20379e0ef744bf1c5d6f2b4ed926dfa490a1b7fa0e9c622d7458a84e8b6545f"
     },
     "rtax_telemetry/errors.py": {
-      "bench_sha256": "e4f12fb46b9d5f71c9aa0f31822a24e97e48501a2b5af7cee5dea56f881d13af",
-      "portable_sha256": "e4f12fb46b9d5f71c9aa0f31822a24e97e48501a2b5af7cee5dea56f881d13af"
+      "bench_sha256": "5c5f5966cec30e908d132cb608ff1d5434288c713a01053401f8eb25c57fe782",
+      "portable_sha256": "5c5f5966cec30e908d132cb608ff1d5434288c713a01053401f8eb25c57fe782"
     },
     "rtax_telemetry/mock.py": {
-      "bench_sha256": "eec26c42877fbcda3bb08e219a1955d9ad803fb4a125bdbe827fea46af060beb",
-      "portable_sha256": "eec26c42877fbcda3bb08e219a1955d9ad803fb4a125bdbe827fea46af060beb"
+      "bench_sha256": "a7e93286508c0cb03ad2d0f90c0f8c05c30ef34e80ecde80707ed0e09c07c246",
+      "portable_sha256": "a7e93286508c0cb03ad2d0f90c0f8c05c30ef34e80ecde80707ed0e09c07c246"
     },
     "rtax_telemetry/schema.py": {
-      "bench_sha256": "103f43ee1ab889f776e2f8fe7e933c08393511832b02d40aaca25b8c71f3b9ca",
-      "portable_sha256": "103f43ee1ab889f776e2f8fe7e933c08393511832b02d40aaca25b8c71f3b9ca"
+      "bench_sha256": "e8c812a2ef93274fefb8a5b7db708b6937f4ee5974a72da453eaeec94aecc41b",
+      "portable_sha256": "e8c812a2ef93274fefb8a5b7db708b6937f4ee5974a72da453eaeec94aecc41b"
     },
     "rtax_telemetry/status.py": {
-      "bench_sha256": "165b8453bc07ab495f304e8ddd643d89a96107295ed4bbf752e490c5b5bb22d3",
-      "portable_sha256": "165b8453bc07ab495f304e8ddd643d89a96107295ed4bbf752e490c5b5bb22d3"
+      "bench_sha256": "15339b6125e965ec1c38bc0e249a2dde02d859046b0966e3520b8368f5670fde",
+      "portable_sha256": "15339b6125e965ec1c38bc0e249a2dde02d859046b0966e3520b8368f5670fde"
     },
     "rtax_telemetry/store.py": {
-      "bench_sha256": "117c33b1092b555e3d483ea8480e7c618a6b7a58ed0a442d77d83edd47567bfe",
-      "portable_sha256": "117c33b1092b555e3d483ea8480e7c618a6b7a58ed0a442d77d83edd47567bfe"
+      "bench_sha256": "716e7ddaf8692c802619c38551c07f6ab3382862cb552fd0284a248e17ba7a1d",
+      "portable_sha256": "716e7ddaf8692c802619c38551c07f6ab3382862cb552fd0284a248e17ba7a1d"
     },
     "rtax_telemetry/transport.py": {
-      "bench_sha256": "6f35e5d045d83d2e8134ac0b1d024db278b1bbb597aac495e92105886a3a1919",
-      "portable_sha256": "39be2c4a1e3d26dee8ba07e67df2a0ba747aba13f700dc54affada769437226d"
+      "bench_sha256": "26ff6d6d46c0d3a6e41f9805d97d06c8a1c211df31ac42f99e3a4c698b6bfeeb",
+      "portable_sha256": "318885481e1dd6732c36921a48fe825492d67daf134e6627f7a670f4ab841e42"
     },
     "tests/__init__.py": {
       "bench_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "tests/test_offline.py": {
-      "bench_sha256": "7a66d31ec4f75b6efbad26b84895c8b0fb070c8794e8c9656533ba737ea3fa30",
+      "bench_sha256": "5f95fa3087f1123af314b026682cf3b5bad80e8012c0ad11efacf73fea82ed59",
       "portable_sha256": "5f95fa3087f1123af314b026682cf3b5bad80e8012c0ad11efacf73fea82ed59"
-    },
-    "tests/test_transport_hardening.py": {
-      "bench_sha256": "aae477bde0a64e634d7cfc55266f4e8ea572277ffdeb6d8ac5b33f8961ef892b",
-      "portable_sha256": "aae477bde0a64e634d7cfc55266f4e8ea572277ffdeb6d8ac5b33f8961ef892b"
-    },
-    "tests/test_pty_and_reap.py": {
-      "bench_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6",
-      "portable_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6"
     },
     "tests/test_fixes.py": {
       "bench_sha256": "c330dcce5b7743e9e5be0514bd0546297b6717c4c810a4ef4b2d2d76767ce48c",
       "portable_sha256": "c330dcce5b7743e9e5be0514bd0546297b6717c4c810a4ef4b2d2d76767ce48c"
     },
+    "tests/test_transport_hardening.py": {
+      "bench_sha256": "bfa10290b78b34ec1f49ac100ad9c917c265f37d0b77282dec1a4045a1c59b23",
+      "portable_sha256": "bfa10290b78b34ec1f49ac100ad9c917c265f37d0b77282dec1a4045a1c59b23"
+    },
+    "tests/test_pty_and_reap.py": {
+      "bench_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6",
+      "portable_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6"
+    },
+    "tests/test_remediation.py": {
+      "bench_sha256": "1c1573fa537e4a50ecd9a3f891592ef51f1f39127ea20a7e2fe48f01d38e2a0e",
+      "portable_sha256": "1c1573fa537e4a50ecd9a3f891592ef51f1f39127ea20a7e2fe48f01d38e2a0e"
+    },
     "tests/pty_auth_probe.py": {
-      "bench_sha256": "c12954c81440f4557bdef7a91727082d2705d1bdeb3b05129a0c2c98fa95813c",
+      "bench_sha256": "7f3211786c379cda50e12a3ca11ce9047decf2451065f792d1561392f54fddc3",
       "portable_sha256": "7f3211786c379cda50e12a3ca11ce9047decf2451065f792d1561392f54fddc3"
     },
     "tests/fake_ssh.sh": {
-      "bench_sha256": "aeda06a2da1a2568292988cb0deb7f7ab7d705936b4a738d6b014ac188bc465f",
-      "portable_sha256": "4cb3c285810a009d254ac7b536cb98b2e5ee4d00f11b741106124111b7982fad"
+      "bench_sha256": "d23d3693b518540e694616a484fc52e17d59c781c7f2982d3e33244795410d0f",
+      "portable_sha256": "d23d3693b518540e694616a484fc52e17d59c781c7f2982d3e33244795410d0f"
     },
     "tests/harness.py": {
-      "bench_sha256": "86ccd02cab46dd27066e42d67a62c077655072b3e1e91556a09192b4a4ee4687",
-      "portable_sha256": "0a189b22f391c85051322de526fb7905cc9da06d2ba82503f15cd277d512e66d"
+      "bench_sha256": "f2bb985c8f08fe75bf9e69e1faf13b8d4fc96b438d10e2142c5c898150c810fe",
+      "portable_sha256": "f2bb985c8f08fe75bf9e69e1faf13b8d4fc96b438d10e2142c5c898150c810fe"
     },
     "tests/smoke_loop.sh": {
       "bench_sha256": "cc1f085aef43554699d4671973602595c7ef670f4206dbab7a70351890c1e863",
@@ -101,6 +125,10 @@
       "bench_sha256": "8eb1a936b16cd9192e8627409d361f62b5afef5f0b2d018a143115739fea954b",
       "portable_sha256": "8eb1a936b16cd9192e8627409d361f62b5afef5f0b2d018a143115739fea954b"
     },
+    "tests/fixtures/README.md": {
+      "bench_sha256": "e1f3e7af14726525d0ab99eaf1a459d909ec1e3e8291fd5333ae2926782c04c8",
+      "portable_sha256": "e1f3e7af14726525d0ab99eaf1a459d909ec1e3e8291fd5333ae2926782c04c8"
+    },
     "tests/fixtures/live_sample.json": {
       "bench_sha256": "e2ee3955ee8181dfd9f1a7e30ac1ab653555ecd6a4e173f3edd99fe995ba93c0",
       "portable_sha256": "e2ee3955ee8181dfd9f1a7e30ac1ab653555ecd6a4e173f3edd99fe995ba93c0"
@@ -108,6 +136,10 @@
     "tests/fixtures/snap_sample.json": {
       "bench_sha256": "0f490351ddff358d76df8ac8ec93916c8527eba67fdeb6e49fada1a26d8bf5f0",
       "portable_sha256": "0f490351ddff358d76df8ac8ec93916c8527eba67fdeb6e49fada1a26d8bf5f0"
+    },
+    "tests/fixtures/null_sections.json": {
+      "bench_sha256": "d74148d11c26dbdc07e33e3fc453cc3587aef54a4f98dcfcd8139e1bf070097f",
+      "portable_sha256": "d74148d11c26dbdc07e33e3fc453cc3587aef54a4f98dcfcd8139e1bf070097f"
     }
   }
 }

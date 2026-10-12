@@ -16,6 +16,7 @@ A C reporter and Python collector developed through firmware analysis, cross-com
 | CPU utilisation | Independently recalculated per sample pair (1.71%, 1.16%); all 13 loop deltas reproduced |
 | Independent review remediation | Two low-severity security findings (both needing an authenticated router) and six correctness findings fixed, each with a behavioural regression test |
 | Follow-up review remediation | Numeric-input containment (huge/overflowing JSON numbers classified, not crashed), strict JSON storage, and non-blocking time-bounded artifact transfer fixed, each with a behavioural regression test |
+| Third review remediation (offline) | Nine further findings (F1–F9) addressed: parser containment and bounded/sanitised diagnostics, the reporter-to-collector null contract, control-master liveness gating with no interactive fallback, recorded ownership/cleanup uncertainty, signal-driven teardown, explicit boot identity, and reporter output/format fixes — 73 new regressions |
 | Continuous operation beyond ~13 min / unattended auth / AP / USB NAS / reconnection after a real failure | Not yet validated |
 
 The [next-phase Hermes prompt](docs/next-phase-prompt.md) framed the foreground monitoring trial, which has since been completed — see the [collector hardware record](docs/collector-hardware-test.md).
@@ -45,8 +46,8 @@ Requires Docker with linux/amd64 support. The base image is pinned by digest, bu
 
 ## Components
 
-- `src/router_health.c`: reporter v1.0.3, schema `router_health/2`; host, uptime, CPU counters, load, memory, filesystem capacity and storage candidates. Output is always valid UTF-8/JSON, including under CPU-counter truncation (represented as `cpu_stat._truncated`).
-- `collector/`: foreground Python collector v1.4.0, bounded SSH transport with byte ceilings, non-blocking time-bounded transfer and hardened provisioning gates, local history, derived CPU measurements and collection incidents.
+- `src/router_health.c`: reporter v1.0.4, schema `router_health/2`; host, uptime, **boot identity** (`host.boot_time`), CPU counters, load, memory, filesystem capacity, storage candidates and an explicit `limits` block. Output is always valid UTF-8/JSON, including under CPU-counter truncation (represented as `cpu_stat._truncated`); a metric that cannot be read is `null`, never 0; a failed stdout write exits non-zero. **Offline-validated only.**
+- `collector/`: foreground Python collector v1.5.0, bounded SSH transport with byte ceilings, non-blocking time-bounded transfer, hardened provisioning gates, a control-master liveness gate, sanitised diagnostics, an ownership-aware cleanup model with durable pending-cleanup evidence, local history, derived CPU measurements and collection incidents. **Offline-validated only.**
 - `tests/`: embedded-test runner, JSON smoke check, synthetic `/proc` fixtures and reporter edge tests.
 - `docs/`: design, validation, hardware milestones and AI-assisted provenance.
 

@@ -2,6 +2,14 @@
 
 Date: 2026-10-12, Australia/Brisbane. All collections were run interactively by Mark Pierotti on one physical RT-AX56U (stock firmware) using the private bench collector against the reporter artifact recorded below. Raw samples, session timestamps, network identifiers, login material and host keys remain outside this repository.
 
+> **Status note (added after the third remediation revision).** Everything on this page describes
+> **collector v1.4.0 / reporter v1.0.3, artifact `3069b2bd…2ce0eb`** — the pair that actually ran on
+> the unit. That remains the only hardware-accepted pair. A newer revision exists
+> (**collector 1.5.0 / reporter 1.0.4, artifact `17ade0d2…66e36`**) which changed the transport
+> lifecycle, cleanup evidence, diagnostics handling and reporter output. It is **OFFLINE-VALIDATED
+> ONLY**: it has never been executed on the unit, so none of the results below describe it. A revised
+> supervised acceptance sequence is required before any of its claims are used.
+
 Two revisions have now been accepted on the unit. The **current** milestone (collector v1.4.0 / reporter v1.0.3) is described first, followed by the earlier milestone (collector v1.2.0 / reporter v1.0.2) as historical evidence for that revision.
 
 ---

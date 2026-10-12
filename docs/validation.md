@@ -4,25 +4,41 @@ Snapshot date: 2026-10-12. Results distinguish private bench hardware work from 
 
 ## Current identities
 
-Reporter source v1.0.3 (remediation revision; imported into both the bench project and this repository):
+Reporter source v1.0.4 (third remediation revision; identical in the bench project and this repository):
 
 ```
-73ff16a943c2dbd5a6be12cfbe57b72d1d03425d9a19544241832dd817fff795
+09d4b4c35798fe4502d6cf23e4d83bab74d3d0de6a6a62f212bfb2a2ba706329
 ```
 
-ARM artifact rebuilt from that source with the recorded workflow (static, soft-float EABI5, ARMv7-A, min kernel 3.2.0), **not distributed** and **not hardware-validated**:
+ARM artifact rebuilt from that source with the recorded workflow (static, soft-float EABI5, ARMv7-A,
+min kernel 3.2.0), **not distributed** and **OFFLINE-VALIDATED ONLY** — no version of the v1.0.4
+reporter has ever run on the unit:
 
 ```
-3069b2bd3290ab3bb1db2d49b60e7e7c6a8e5090e4735537980c65926d2ce0eb
+17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36
 ```
 
-The previous hardware-tested artifact is preserved for provenance only:
+The **hardware-accepted** artifact is v1.0.3 (`3069b2bd…2ce0eb`): it is the one that produced the 17
+accepted samples recorded in the [collector hardware record](collector-hardware-test.md). It remains
+preserved in `out/router_health_arm.v1.0.3` (and as `out/router_health` in the bench project until the
+next hardware acceptance replaces it). The older hardware-tested v1.0.2 artifact is also preserved:
 
 ```
-b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.0.2)
+3069b2bd3290ab3bb1db2d49b60e7e7c6a8e5090e4735537980c65926d2ce0eb   (reporter v1.0.3 — HARDWARE-ACCEPTED)
+b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.0.2 — hardware-tested)
 ```
 
-Collector base version: 1.4.0. [Import manifest](import-manifest.json) records the bench-file and portable-copy hashes; only deliberate configuration differences (bench target, data dir, artifact/known_hosts defaults, documentation addresses) remain. Apt packages remain unpinned, so rebuilt artifact hashes may differ.
+> **Correction.** Earlier revisions of this page described `3069b2bd…` as "not hardware-validated".
+> That was wrong and contradicted `collector-hardware-test.md`, which records 17 accepted samples with
+> exactly that digest. `3069b2bd…` **is** the hardware-accepted artifact.
+>
+> **The portable `build-arm.sh` and the bench `build.sh` now reproduce the IDENTICAL ELF digest** for
+> v1.0.4, so the two recipes agree bit for bit. apt packages remain unpinned, so a future rebuild on
+> updated packages may differ; the recorded package versions are the audit trail.
+
+Collector base version: **1.5.0** (offline-validated only). [Import manifest](import-manifest.json)
+records the bench-file and portable-copy hashes; only deliberate configuration differences (bench
+target, data dir, artifact/known_hosts defaults, documentation addresses) remain.
 
 ## Remediation revision (2026-10-12)
 
@@ -54,6 +70,48 @@ A follow-up independent review (Codex and Claude Code) raised three numeric-inpu
 
 Verification: 137 tests pass on Python 3.11.16 and 3.13.1 (was 116); the partial-reader reproducer now returns within the deadline (0.2 s bound, ~0.2 s elapsed, previously ~2.0 s). The stored JSON, outcome classification and bad-input-then-good-input recovery are asserted. Both copies pass the full suite; `smoke_loop.sh` and `demo_offline.sh` still exit cleanly.
 
+## Third remediation revision (2026-10-12) — OFFLINE-VALIDATED ONLY
+
+An independent **static** review (Claude Code, `claude-opus-5-5`, max effort) was then validated by a
+second agent, which independently reproduced five of its findings. Nine findings (F1–F9) were raised;
+this revision addresses them, and the reporter source moved to **v1.0.4** so the artifact was rebuilt.
+Full mapping, including what was **deferred** and why:
+`~/rea-worker/reports/RT-AX56U_REMEDIATION3_20261012.md`.
+
+| # | Finding | Resolution |
+| --- | --- | --- |
+| F1 | A multiplexed command had no control-master liveness gate, so a lost master could fall back to a fresh direct connection needing interactive auth (`transport.py`) | `ssh -O check` before every multiplexed command (and before teardown); `BatchMode=yes` + `ControlMaster=no` on those clients; a dedicated `control_master_lost` outcome; the loop refuses an interval at/above `ControlPersist` |
+| F2 | Remote state under-recorded: a failed provision persisted `cleanup_ok: true`, a lost `mkdir` reply recorded nothing, a final-teardown failure could vanish from history (`transport.py`, `core.py`) | Ownership is a recorded tri-state (`none`/`unknown`/`owned`) set before `mkdir` is sent; the provisioning cleanup consequence is carried onto the exception and into the attempt; a `teardown` record is appended to `outcomes.jsonl`; unconfirmed cleanup is written to `pending_cleanup.jsonl` naming the exact path — with **no** automatic deletion |
+| F3 | Device output could raise past the classifier: `IndexError` on a control-byte reply, `ValueError` on a >4300-digit marker; `OSError`/`TypeError` from the store, a missing `ssh`, a wrong-shaped `state.json` (`transport.py`, `core.py`) | Tokenisation by `split()` with an empty-token guard; the numeric marker is a bounded, lookahead-anchored match; `state.json` of the wrong shape is quarantined; `OSError` becomes `storage_error`; a final catch-all records `internal_error` and still logs the attempt |
+| F4 | Unsanitised, effectively unbounded device text reached the terminal and local history (`transport.py`, `schema.py`) | One sanitiser (`errors.sanitize_detail`) bounds every `detail` to printable ASCII, one line, ~500 chars; schema diagnostics render values and key names through `reprlib`; a multiplexed `255` is classified into transport classes only, so a device cannot select `ssh_hostkey_mismatch`/`ssh_auth_failure` |
+| F5 | Only SIGINT ran teardown; `-O exit` status ignored; SIGINT during handover read as a transport failure | SIGHUP and SIGTERM route to the orderly path in **both** modes; master shutdown is verified with a follow-up `-O check` and a last-resort signal only to the PID OpenSSH reported; SIGINT during handover raises `KeyboardInterrupt` |
+| F6 | Reboot detection relied on uptime falling; the predecessor was chosen by filename order; reset detection could false-positive on idle/iowait reclassification (`cpu.py`, `core.py`) | Explicit boot identity (`host.boot_time` from `/proc/stat` `btime`) is the primary test; the predecessor comes from `state.last_valid_sample.path` and must match the source; the idle group is compared as a sum |
+| F7 | A reporter document with `"cpu": null` / `"loadavg": null` was rejected, discarding the sample (`schema.py`) | Both may be null; an absent or wrongly-typed section is still a failure; a reporter-derived fixture now exercises the contract through `collector.py validate` |
+| F8 | Reporter output-integrity gaps: unescaped BogoMIPS and `cpu_stat` keys, `sscanf` field shift on an overlong `/proc/mounts` field, `\000`/`>\377` octal escapes, silent caps, exit 0 on a failed stdout write, statvfs underflow on `f_bfree > f_blocks`, floored `used_percent` (`router_health.c`) | All escaped/detected/explicit: a hand tokenizer that SKIPS and COUNTS an overlong field, literal non-byte octal escapes, a `limits` block reporting every bound, non-zero exit on a failed write, clamped free figures, df-style ceiling rounding |
+| F9 | SSH not isolated from ambient configuration (`transport.py`) | Hermetic options (`-F /dev/null`, `/dev/null` global known-hosts, agent/forwarding/proxy pinned off, `UpdateHostKeys=no`, `KnownHostsCommand=none`) plus `SSH_ASKPASS*` scrubbed from the child environment. The precondition was checked locally: **there is no `~/.ssh/config`**, so the change cannot break the working bench connection's algorithm negotiation |
+
+Also addressed from the review's lower-severity list: `--interval` validation, hard stops that
+actually stop the loop, provisioning-stage classification (`provisioning_failure`) distinct from a
+reporter failure, signal statuses no longer read as "killed by the watchdog", rc-0-without-marker
+refused for cleanup and control execution, a closed stderr no longer mapped to exit 0, `0600`/`0700`
+evidence modes, `fsync` on evidence writes, torn-line repair, duplicate-JSON-key refusal, and an
+`O_NOFOLLOW` lock. The stale legacy shell launchers are **deprecated by documentation, not edited**
+(their bytes are historical evidence): `LEGACY_LAUNCHERS.md` in the bench reporter project records
+the exact weaknesses.
+
+**Verification.** 210 offline collector tests pass (137 previously, **73 new**): master loss and
+shutdown verification, failed-provision and teardown evidence, hostile 200 KiB diagnostics, the
+null-section contract, file modes, torn lines, hard stops, signal-driven teardown in both modes, and
+the boot-identity rules. The reporter's edge suite grew to 25 assertions and passes on the native
+build **and** on the ARM artifact under QEMU. `sh build-arm.sh` and the bench `build.sh` reproduce the
+**identical** ARM digest `17ade0d2…66e36` (self-test 8/8 under QEMU). The 17 bench fixture assertions
+and 5 comparator cases still pass against the new artifact.
+
+**This revision ran no hardware test.** Neither collector 1.5.0 nor reporter 1.0.4 has been executed
+on the unit; reconnection after a real transport failure, hardware interruption/cleanup paths,
+unattended authentication, long runs, reboot persistence, USB/NAS and AP operation all remain
+unvalidated.
+
 ## Prior investigation
 
 REA/Ghidra recovered a known-answer fixture whose outputs were 7, 10, 22, 37, -1; GNU objdump corroborated instructions. This covered a small, unoptimized, non-stripped ELF. The downloaded ASUS image was 386_52090; the physical router runs 386_45898. Image ABI observations cannot silently establish the live unit's ABI. Inventory identifies Linux 4.1.52 armv7l, four ARMv7 cores and approximately 498 MiB memory. GLIBC symbol strings alone do not identify an installed libc release.
@@ -66,18 +124,19 @@ The [collector hardware record](collector-hardware-test.md) records two mileston
 
 ## Repeatable repository checks
 
-- `make test-reporter`: native compile, five embedded groups, compact/pretty JSON, synthetic `/proc` fixtures, and the reporter edge tests (CPU truncation stays valid JSON; invalid-byte mount names stay valid UTF-8). macOS cannot validate real Linux `/proc` collection; fixture statvfs capacity comes from the executing host.
-- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup tests, plus the remediation regression suite. No router connection.
+- `make test-reporter`: native compile, **eight** embedded groups, compact/pretty JSON, synthetic `/proc` fixtures, and 25 reporter edge assertions (CPU truncation stays valid JSON; invalid-byte mount names stay valid UTF-8; an overlong `/proc/mounts` field is skipped and counted; a hostile BogoMIPS is escaped; `\000`/`\777` stay literal; `boot_time` is present/null correctly; a failed stdout write exits non-zero). macOS cannot validate real Linux `/proc` collection; fixture statvfs capacity comes from the executing host.
+- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus both remediation regression suites (`test_fixes.py`, `test_remediation.py`). No router connection.
 - `make test`: both targets.
-- `sh build-arm.sh`: native Linux and ARM/QEMU checks plus static-link inspection, with toolchain hashes recorded. The rebuilt standalone ARM recipe was rerun for the remediation revision and its output is recorded above; historical ARM build/emulation evidence belongs to the bench artifact.
+- `sh build-arm.sh`: native Linux and ARM/QEMU checks plus static-link inspection, with toolchain hashes recorded.
 
 ## Portable-copy preparation
 
 Executed for the portable repository update:
 
-- `make test` passed on macOS: five embedded reporter groups, compact/pretty JSON, 29 fixture assertions, the reporter edge tests, and 137 collector tests (136 passed, one skipped). The controlling-PTY input tests passed with local terminal access.
-- The remediation revision was verified end to end on this host: the ARM artifact built with `sh build-arm.sh` passed its embedded groups, the fixture assertions and the reporter edge tests under QEMU.
+- `make test` passed on macOS: eight embedded reporter groups, compact/pretty JSON, the synthetic `/proc` fixture assertions, 25 reporter edge assertions, and **210 collector tests (209 passed, one skipped)**. The controlling-PTY input tests passed with local terminal access.
+- The third remediation revision was verified end to end on this host: the ARM artifact built with `sh build-arm.sh` passed its embedded groups (8/8) and the reporter edge suite (25/25) under QEMU, and reported `boot_time` and the `limits` block.
+- The bench `build.sh` independently reproduced the **same** ARM digest.
 - Packaged mock CLI, foreground-loop shutdown (exit 130 and lock release) and scenario demo passed.
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
 
-No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. The rebuilt ARM artifact is **not** hardware-validated.
+No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.0** and reporter **1.0.4** are **OFFLINE-VALIDATED ONLY**; the hardware-accepted pair remains collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.
