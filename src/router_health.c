@@ -30,9 +30,10 @@
 #include <errno.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
+#include <math.h>
 
 #define TOOL_NAME    "router_health"
-#define TOOL_VERSION "1.0.2"
+#define TOOL_VERSION "1.0.3"
 #define SCHEMA       "router_health/2"
 
 /* Hard bounds. Each exists so that a pathological /proc file cannot make the tool
@@ -78,27 +79,89 @@ static char *slurp(const char *path)
     return buf;
 }
 
-/* Copy a JSON-safe version of src into dst (bounded, always NUL-terminated). */
+/* Length of a valid UTF-8 sequence starting at lead byte c, or 0 if c cannot
+   start one. */
+static int utf8_seq_len(unsigned char c)
+{
+    if (c < 0x80) return 1;
+    if (c >= 0xC2 && c <= 0xDF) return 2;
+    if (c >= 0xE0 && c <= 0xEF) return 3;
+    if (c >= 0xF0 && c <= 0xF4) return 4;
+    return 0;
+}
+
+/* True when the n bytes at src are a well-formed UTF-8 sequence (continuation
+   bytes in range, and rejecting overlong forms, UTF-16 surrogates and code
+   points above U+10FFFF). */
+static int utf8_valid_at(const char *src, int n)
+{
+    const unsigned char *s = (const unsigned char *)src;
+    unsigned char c = s[0];
+    for (int k = 1; k < n; k++)
+        if (s[k] < 0x80 || s[k] > 0xBF) return 0;
+    if (n == 3) {
+        if (c == 0xE0 && s[1] < 0xA0) return 0;      /* overlong */
+        if (c == 0xED && s[1] > 0x9F) return 0;      /* surrogate */
+    } else if (n == 4) {
+        if (c == 0xF0 && s[1] < 0x90) return 0;      /* overlong */
+        if (c == 0xF4 && s[1] > 0x8F) return 0;      /* above U+10FFFF */
+    }
+    return 1;
+}
+
+/* Copy a JSON-safe version of src into dst (bounded, always NUL-terminated).
+
+   ENCODING POLICY: the emitted text is guaranteed to be valid UTF-8. Bytes that
+   form a well-formed UTF-8 sequence are copied through unchanged; any byte that
+   cannot be decoded (an invalid lead or continuation byte, or a multibyte
+   sequence the buffer bound would cut) is replaced with U+FFFD REPLACEMENT
+   CHARACTER, emitted as the JSON escape \ufffd. This is a documented
+   lossy-replacement policy: a filesystem name containing invalid bytes still
+   yields valid JSON, at the cost of not being byte-for-byte reversible. */
 static void json_escape(const char *src, char *dst, size_t dstsz)
 {
     size_t j = 0;
     if (dstsz == 0) return;
-    for (size_t i = 0; src && src[i] && j + 7 < dstsz; i++) {
+    for (size_t i = 0; src && src[i]; ) {
         unsigned char c = (unsigned char)src[i];
-        switch (c) {
-        case '"':  dst[j++]='\\'; dst[j++]='"';  break;
-        case '\\': dst[j++]='\\'; dst[j++]='\\'; break;
-        case '\n': dst[j++]='\\'; dst[j++]='n';  break;
-        case '\r': dst[j++]='\\'; dst[j++]='r';  break;
-        case '\t': dst[j++]='\\'; dst[j++]='t';  break;
-        default:
-            if (c < 0x20) j += (size_t)snprintf(dst + j, dstsz - j, "\\u%04x", c);
-            else          dst[j++] = (char)c;
+        if (c < 0x20 || c == '"' || c == '\\') {
+            char esc[8];
+            if (c == '"')       snprintf(esc, sizeof esc, "\\\"");
+            else if (c == '\\') snprintf(esc, sizeof esc, "\\\\");
+            else if (c == '\n') snprintf(esc, sizeof esc, "\\n");
+            else if (c == '\r') snprintf(esc, sizeof esc, "\\r");
+            else if (c == '\t') snprintf(esc, sizeof esc, "\\t");
+            else                snprintf(esc, sizeof esc, "\\u%04x", c);
+            size_t el = strlen(esc);
+            if (j + el >= dstsz) break;
+            memcpy(dst + j, esc, el);
+            j += el;
+            i++;
+            continue;
         }
+        if (c < 0x80) {
+            if (j + 1 >= dstsz) break;
+            dst[j++] = (char)c;
+            i++;
+            continue;
+        }
+        int n = utf8_seq_len(c);
+        if (n == 0 || !utf8_valid_at(src + i, n)) {
+            const char *rep = "\\ufffd";
+            size_t el = strlen(rep);
+            if (j + el >= dstsz) break;
+            memcpy(dst + j, rep, el);
+            j += el;
+            i++;
+            continue;
+        }
+        if (j + (size_t)n >= dstsz) break;   /* would not fit: stop cleanly */
+        memcpy(dst + j, src + i, (size_t)n);
+        j += (size_t)n;
+        i += (size_t)n;
     }
     dst[j] = '\0';
 }
-
 /* Decode the octal escapes /proc/mounts uses (space→\040, tab→\011, nl→\012, \→\134). */
 static void mount_unescape(char *s)
 {
@@ -136,7 +199,10 @@ static int cpustat_append(char *body, size_t cap, size_t *len, int first,
                      "%s\"%s\":{\"user\":%llu,\"nice\":%llu,\"system\":%llu,"
                      "\"idle\":%llu,\"iowait\":%llu,\"irq\":%llu,\"softirq\":%llu,\"steal\":%llu}",
                      first ? "" : ",", key, u,n,s,id,io,ir,si,st);
-    if (w < 0 || (size_t)w >= cap - *len) return 0;
+    if (w < 0 || (size_t)w >= cap - *len) {
+        body[*len] = '\0';   /* discard any partial text snprintf wrote */
+        return 0;
+    }
     *len += (size_t)w;
     return 1;
 }
@@ -168,8 +234,8 @@ static void emit_cpu_stat(void)
         }
         line = strtok(NULL, "\n");
     }
-    if (first)               printf("\"cpu_stat\":null");
-    else if (truncated)      printf("\"cpu_stat\":{\"_truncated\":true,%s}", body);
+    if (truncated)           printf("\"cpu_stat\":{\"_truncated\":true%s%s}", len ? "," : "", body);
+    else if (first)          printf("\"cpu_stat\":null");
     else                     printf("\"cpu_stat\":{%s}", body);
     free(body);
     free(buf);
@@ -183,7 +249,8 @@ static void emit_loadavg(void)
     if (!buf) { printf("\"loadavg\":null"); return; }
     char *t = trim(buf);
     double l1=0,l5=0,l15=0; unsigned running=0,total=0; unsigned long lastpid=0;
-    if (sscanf(t, "%lf %lf %lf %u/%u %lu", &l1,&l5,&l15,&running,&total,&lastpid) >= 5)
+    if (sscanf(t, "%lf %lf %lf %u/%u %lu", &l1,&l5,&l15,&running,&total,&lastpid) >= 5
+        && isfinite(l1) && isfinite(l5) && isfinite(l15))
         printf("\"loadavg\":{\"load1\":%.2f,\"load5\":%.2f,\"load15\":%.2f,"
                "\"procs_running\":%u,\"procs_total\":%u}", l1,l5,l15,running,total);
     else
