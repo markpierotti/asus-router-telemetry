@@ -36,9 +36,10 @@ b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.
 > v1.0.4, so the two recipes agree bit for bit. apt packages remain unpinned, so a future rebuild on
 > updated packages may differ; the recorded package versions are the audit trail.
 
-Collector base version: **1.5.2** (offline-validated only). [Import manifest](import-manifest.json)
-records the bench-file and portable-copy hashes; only deliberate configuration differences (bench
-target, data dir, artifact/known_hosts defaults, documentation addresses) remain.
+Collector base version: **1.5.4** (offline-tested only; the last collector run on the unit is
+1.5.2). [Import manifest](import-manifest.json) records the bench-file and portable-copy hashes;
+only deliberate configuration differences (bench target, data dir, artifact/known_hosts defaults,
+documentation addresses) remain.
 
 ## Remediation revision (2026-10-12)
 
@@ -195,6 +196,70 @@ pending-cleanup entries; and when a provision *fails* (is not cancelled) while t
 also cannot be confirmed stopped, the master's verdict is logged but not persisted, because
 it is only lifted into the collector when an established session is torn down.
 
+## Third follow-up (offline)
+
+Collector **1.5.3** corrected four defects reproduced against 1.5.2, including the two noted
+just above: a relative `--data-dir` persisted a relative sample pointer; a failed final
+cleanup was recorded twice in `--loop` mode; an ordinary failed provision did not persist an
+unconfirmed master verdict; and a cancelled first-ever provision reported a false
+`EVIDENCE NOT PERSISTED`. `collector/tests/test_followup3_regressions.py` holds 11 tests
+(7 regressions, 4 guards). It did not refresh the import manifest; the fourth follow-up did.
+
+## Fourth follow-up (offline)
+
+An independent review of the 1.5.3 commit (`c2176ba`) reproduced two gaps with network-free
+probes and reported a test discrepancy. All three were worked offline in collector **1.5.4**.
+The reporter source and the ARM artifact are unchanged, so nothing was rebuilt.
+
+| Finding | Defect reproduced | Correction |
+| --- | --- | --- |
+| R1 | The 1.5.3 lookup still tried a legacy **relative** sample pointer against the current working directory *before* its owning store, and the collector kept a second verbatim-path fallback. A file at the same relative path under the directory the collector was started from — same transport, same host, so the source guard could not tell — was taken as the predecessor and compared against. `Store.last_sample()` additionally fell back to the newest file by name when the state-selected sample was missing | One resolver, in the store, and the working directory is never consulted: an absolute pointer is used verbatim; a relative one resolves to the same file name inside that store's own `samples/`. A missing sample is reported and never replaced — not by a file elsewhere and not by filename order. Nothing is rewritten |
+| R2 | When an **established** session lost its link, the collection failed and so did the removal of its directory. The attempt recorded `cleanup_ok: false`, but only *provisioning* failures queued a directory. The next attempt reset the per-attempt cleanup error, and after a recovery the clean final close wrote no `teardown` record, so `pending_cleanup.jsonl` did not exist and `status` showed nothing to reconcile | The directory is queued, with its exact path and ownership, by the attempt that learns of it; once per event, however many code paths notice it. The `teardown` record stays a final-close record. A master-only uncertainty still queues nothing. A queue write that fails is reported with the directory's name and is not displaced by a later failure; one cut short by a cancellation is retried at the close |
+| PTY | Two controlling-terminal tests failed for the reviewer (`exc=RemoteTimeout;restored=True`) on two interpreters while passing elsewhere on the same machine | Not a transport defect and not a harness race — see below. The assertions are unchanged; a failure now states the environment restriction that caused it |
+
+**The terminal-test discrepancy is an environment restriction.** Under the reviewer's Seatbelt
+sandbox a process that has acquired a controlling terminal may still not open it for writing:
+`open("/dev/tty", O_RDWR)` returns `EPERM`, while the read-only open, `TIOCSCTTY` and
+`tcsetpgrp` on an already-open descriptor succeed. The transport performs exactly that
+read-write open, both to decide that a terminal is usable and to hand its foreground to the
+child, as ssh's own prompt does. Reproduced on the unmodified 1.5.3 tree with
+`codex sandbox -P :workspace`: the same two failures with the same two signatures, on Python
+3.14.7 and on 3.13.1; outside the sandbox both interpreters pass all tests in that file. The
+harness's synchronisation was examined separately and no race was found: 40 of 40 unmodified
+runs passed, and the read succeeds whether the input is queued a second before any reader
+exists or injected a second after the reader blocks. The two tests are **not** skipped in a
+restricted runner — there the proof was not obtained — and their failure message begins
+`ENVIRONMENT RESTRICTION` with the errno the runner returned; a third test checks in any
+runner that the transport's own terminal detection agrees with what the runner permits.
+
+**A latent ordering window was found and deliberately not changed.** The transport spawns the
+ssh child and *then* hands it the terminal's foreground. A child that touched the terminal
+inside that gap would be stopped and never continued. Delaying the handover by 0.5 s under
+fault injection reproduces a timeout every time; with no injected delay the gap measured
+0.15–0.26 ms against roughly 6 ms before the test's stand-in first touches the terminal, and
+a real ssh must complete a TCP connection and a key exchange before it prompts. It was never
+observed without the injected delay, it is not what the reviewer saw, and closing it would
+change the password-prompt path that was exercised on hardware. It is recorded for review
+rather than patched.
+
+**Verification of the regressions themselves.** `collector/tests/test_followup4_regressions.py`
+adds 28 tests: 18 regressions and 10 guards. Against an isolated `git archive` snapshot of
+`c2176ba` with only the new test file and the test stand-in's link-loss knob placed in it,
+**all 18 regressions fail** (by assertion, no errors) and all 10 guards pass; with the
+corrections all 28 pass. The working tree was never stashed or reverted to obtain that. One
+of them rehearses the link-loss sequence on the real `SSHTransport` against the fake `ssh`:
+a healthy attempt, the link pulled under the established session, three failures and an
+incident, recovery, resolution and a clean close — with the lost directory queued exactly
+once and its removal never retried.
+
+**Not established.** The fake `ssh` reports a lost link as an immediately broken channel.
+How long a real multiplexed command hangs on a dead link, whether the local deadline or the
+master's keepalives end it first, and therefore which outcome class the first post-loss
+attempt records, are unmeasured. An absolute sample pointer is honoured verbatim, including
+one that names a file outside its data directory; it is not re-anchored. A cancellation that
+lands inside a local evidence write can still cost that attempt's own record, in which case
+the directory is queued at the final close.
+
 ## Prior investigation
 
 REA/Ghidra recovered a known-answer fixture whose outputs were 7, 10, 22, 37, -1; GNU objdump corroborated instructions. This covered a small, unoptimized, non-stripped ELF. The downloaded ASUS image was 386_52090; the physical router runs 386_45898. Image ABI observations cannot silently establish the live unit's ABI. Inventory identifies Linux 4.1.52 armv7l, four ARMv7 cores and approximately 498 MiB memory. GLIBC symbol strings alone do not identify an installed libc release.
@@ -208,7 +273,7 @@ The [collector hardware record](collector-hardware-test.md) records two mileston
 ## Repeatable repository checks
 
 - `make test-reporter`: native compile, **eight** embedded groups, compact/pretty JSON, synthetic `/proc` fixtures, and 25 reporter edge assertions (CPU truncation stays valid JSON; invalid-byte mount names stay valid UTF-8; an overlong `/proc/mounts` field is skipped and counted; a hostile BogoMIPS is escaped; `\000`/`\777` stay literal; `boot_time` is present/null correctly; a failed stdout write exits non-zero). macOS cannot validate real Linux `/proc` collection; fixture statvfs capacity comes from the executing host.
-- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus all four regression suites (`test_fixes.py`, `test_remediation.py`, `test_followup_regressions.py`, `test_followup2_regressions.py`). No router connection.
+- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus all six regression suites (`test_fixes.py`, `test_remediation.py` and `test_followup_regressions.py` through `test_followup4_regressions.py`). No router connection. Run it serially, and from a runner that may open its controlling terminal for writing (see the fourth follow-up above).
 - `make test`: both targets.
 - `sh build-arm.sh`: native Linux and ARM/QEMU checks plus static-link inspection, with toolchain hashes recorded.
 
@@ -221,5 +286,6 @@ Executed for the portable repository update:
 - The bench `build.sh` independently reproduced the **same** ARM digest.
 - Packaged mock CLI, foreground-loop shutdown (exit 130 and lock release) and scenario demo passed.
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
+- For collector 1.5.4 the collector suite was run once, serially, in each tree: **292 tests (291 passed, one skipped)** on Python 3.14.7 for this copy and on Python 3.13.1 for the bench copy. The skipped test needs the *test process itself* to have a controlling terminal, which the runner used did not provide; the controlling-PTY input tests create their own and passed.
 
-No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.2** and reporter **1.0.4** are **OFFLINE-VALIDATED ONLY**; the hardware-accepted pair remains collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.
+No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.3** and **1.5.4** are **OFFLINE-TESTED ONLY** and have not been run on the unit. The last collector run on the unit is 1.5.2 with reporter 1.0.4 (healthy path only; see the collector README); the 17-sample hardware record is collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.

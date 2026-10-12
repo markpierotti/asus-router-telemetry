@@ -1,10 +1,10 @@
 {
-  "date": "2026-10-12",
-  "note": "Third remediation revision (findings F1-F9 from an independent static review, validated by a second agent). Applied to BOTH the private bench copy and this portable copy: parser containment and bounded/sanitised diagnostics, the reporter-to-collector null contract, a control-master liveness gate with no interactive fallback, recorded tri-state ownership with durable pending-cleanup evidence, SIGHUP/SIGTERM teardown in both modes, verified master shutdown, explicit boot identity, and reporter output-integrity/format fixes. Only deliberate configuration differences remain (bench target/user, data dir, artifact and known_hosts defaults and pinned digests, and config.example.json). The two trees' collector tests are now byte-identical, so no sanitized test addresses remain. Second follow-up (collector 1.5.2): provisioning facts are read where a failed start() enters the collector, so no classifier branch can drop them; a cancellation during the control-master exit is held for one bounded check, recorded by stage and re-raised. Every hash below was regenerated from the files themselves in that revision: eight portable entries had not been refreshed for 1.5.1 and no longer matched the committed files, and the two follow-up regression suites were not listed.",
+  "date": "2026-10-13",
+  "note": "Third remediation revision (findings F1-F9 from an independent static review, validated by a second agent). Applied to BOTH the private bench copy and this portable copy: parser containment and bounded/sanitised diagnostics, the reporter-to-collector null contract, a control-master liveness gate with no interactive fallback, recorded tri-state ownership with durable pending-cleanup evidence, SIGHUP/SIGTERM teardown in both modes, verified master shutdown, explicit boot identity, and reporter output-integrity/format fixes. Only deliberate configuration differences remain (bench target/user, data dir, artifact and known_hosts defaults and pinned digests, and config.example.json). The two trees' collector tests are now byte-identical, so no sanitized test addresses remain. Second follow-up (collector 1.5.2): provisioning facts are read where a failed start() enters the collector, so no classifier branch can drop them; a cancellation during the control-master exit is held for one bounded check, recorded by stage and re-raised. Every hash below was regenerated from the files themselves in that revision: eight portable entries had not been refreshed for 1.5.1 and no longer matched the committed files, and the two follow-up regression suites were not listed. Third follow-up (collector 1.5.3): an absolute data directory and sample pointer, one final-cleanup record per run, a persisted master verdict after a failed provision, and no false persistence error on a cancelled first run. Fourth follow-up (collector 1.5.4): a legacy relative sample pointer resolves inside its owning store and never against the working directory; a directory an established session could not remove is queued for reconciliation by the attempt that learns of it; and the controlling-terminal tests name the runner restriction that makes them fail under a sandbox. Every hash below was regenerated from the files themselves in the 1.5.4 revision: the 1.5.3 revision had not refreshed this manifest, so 4 entries no longer matched the committed files and the third follow-up's regression suite was not listed.",
   "reporter_source_sha256": "09d4b4c35798fe4502d6cf23e4d83bab74d3d0de6a6a62f212bfb2a2ba706329",
   "reporter_version": "1.0.4",
-  "collector_version": "1.5.2",
-  "bench_collector_version": "1.5.2",
+  "collector_version": "1.5.4",
+  "bench_collector_version": "1.5.4",
   "arm_artifact_sha256": "17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36",
   "arm_artifact_note": "Reproduced IDENTICALLY by both the portable build-arm.sh and the bench build.sh (gcc 12.2.0 arm-linux-gnueabi, -static -std=c11 -march=armv7-a). OFFLINE-VALIDATED ONLY. The hardware-accepted artifact remains 3069b2bd3290ab3bb1db2d49b60e7e7c6a8e5090e4735537980c65926d2ce0eb (reporter v1.0.3).",
   "reads_no_private_state": true,
@@ -42,16 +42,16 @@
       "portable_sha256": "b1df88a18e992da98b4e3cc4b1e9c107bf8f5c3346abcaf9c5ffea8835383703"
     },
     "rtax_telemetry/__init__.py": {
-      "bench_sha256": "35d7368369274beee97ad4817581b7a6d9d4e6b6d069fa3218896a4f1825193e",
-      "portable_sha256": "35d7368369274beee97ad4817581b7a6d9d4e6b6d069fa3218896a4f1825193e"
+      "bench_sha256": "0596ef114cfce8e4c19b36b65d474b805a2ac005780c13ca112bbd951f8aec12",
+      "portable_sha256": "0596ef114cfce8e4c19b36b65d474b805a2ac005780c13ca112bbd951f8aec12"
     },
     "rtax_telemetry/cli.py": {
-      "bench_sha256": "16e3efe8b1fe34e37036e13ccfca576e160eb64ce1af40d2e3bcfe5b9ad995ca",
-      "portable_sha256": "a942bda2bcc265cf44688f0c8967cd2be858a1e37a571fd48bef0f3724183aef"
+      "bench_sha256": "03e98aa6f4a1073dc6354987ee1c0cdbb2a917bf1816c5436423943167962870",
+      "portable_sha256": "d018e167e6891a6f01ec967c26979082ad61288a77ba3c0110d5b339467369bc"
     },
     "rtax_telemetry/core.py": {
-      "bench_sha256": "e7571cd90bf50653c932f086d70edc9ce1013db041aa4c0f50775a0eaf2b2cc3",
-      "portable_sha256": "e7571cd90bf50653c932f086d70edc9ce1013db041aa4c0f50775a0eaf2b2cc3"
+      "bench_sha256": "de2f239a177e3ebbe2185941cf350019b3d4ee7b5780ce984d09725b2e0e0cae",
+      "portable_sha256": "de2f239a177e3ebbe2185941cf350019b3d4ee7b5780ce984d09725b2e0e0cae"
     },
     "rtax_telemetry/cpu.py": {
       "bench_sha256": "c20379e0ef744bf1c5d6f2b4ed926dfa490a1b7fa0e9c622d7458a84e8b6545f",
@@ -74,8 +74,8 @@
       "portable_sha256": "15339b6125e965ec1c38bc0e249a2dde02d859046b0966e3520b8368f5670fde"
     },
     "rtax_telemetry/store.py": {
-      "bench_sha256": "716e7ddaf8692c802619c38551c07f6ab3382862cb552fd0284a248e17ba7a1d",
-      "portable_sha256": "716e7ddaf8692c802619c38551c07f6ab3382862cb552fd0284a248e17ba7a1d"
+      "bench_sha256": "f35071faaba7ac89817ebb35bc01b17dd8d262912276cabbcedda0d820e0a874",
+      "portable_sha256": "f35071faaba7ac89817ebb35bc01b17dd8d262912276cabbcedda0d820e0a874"
     },
     "rtax_telemetry/transport.py": {
       "bench_sha256": "8b1f94e64439629707545a722f76433c626b2d820df07bfa785c39a1d51d9c3d",
@@ -98,8 +98,8 @@
       "portable_sha256": "7e18b155b33c577266377ad1c88b98d303c1338bfea0fb2dba509b06fc1ca400"
     },
     "tests/test_pty_and_reap.py": {
-      "bench_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6",
-      "portable_sha256": "18a579356a13f21c72245737f79f86b1a641dac216422991b853ac8b54dbaad6"
+      "bench_sha256": "6bb0660cb825c3f99907100c461e4071c36f7dec7e49233fa25528c04b6aa9ef",
+      "portable_sha256": "6bb0660cb825c3f99907100c461e4071c36f7dec7e49233fa25528c04b6aa9ef"
     },
     "tests/test_remediation.py": {
       "bench_sha256": "ba766faae704395369885b21f04406c40b9c440305ba9564fe4f7b9294549be5",
@@ -114,12 +114,20 @@
       "portable_sha256": "eff061bd3a19e4a61c2491e81e35704ad5a03b0ae04cddd3533d6ecb7bbcb041"
     },
     "tests/pty_auth_probe.py": {
-      "bench_sha256": "7f3211786c379cda50e12a3ca11ce9047decf2451065f792d1561392f54fddc3",
-      "portable_sha256": "7f3211786c379cda50e12a3ca11ce9047decf2451065f792d1561392f54fddc3"
+      "bench_sha256": "71b79b6e1cd83aa6ab52215de831e074a582a5db9c3b617e6f77cb563f032cba",
+      "portable_sha256": "71b79b6e1cd83aa6ab52215de831e074a582a5db9c3b617e6f77cb563f032cba"
+    },
+    "tests/test_followup3_regressions.py": {
+      "bench_sha256": "6883fdf452153b446ae49c066facda80fc62d7a53bbc86015aeb71a991c87298",
+      "portable_sha256": "6883fdf452153b446ae49c066facda80fc62d7a53bbc86015aeb71a991c87298"
+    },
+    "tests/test_followup4_regressions.py": {
+      "bench_sha256": "27f6e71cbcc74e3351b930b13669e51ab8903d39358838526725936dd7d4d6cf",
+      "portable_sha256": "27f6e71cbcc74e3351b930b13669e51ab8903d39358838526725936dd7d4d6cf"
     },
     "tests/fake_ssh.sh": {
-      "bench_sha256": "209e6a2393f109f19d7cc87c40c1fbb2d4cef5c7713dd2022f401b9632fc6b80",
-      "portable_sha256": "209e6a2393f109f19d7cc87c40c1fbb2d4cef5c7713dd2022f401b9632fc6b80"
+      "bench_sha256": "c7491174b7c9672983c2ed0d60b55081723a5f92175de1e61e893f35896698bf",
+      "portable_sha256": "c7491174b7c9672983c2ed0d60b55081723a5f92175de1e61e893f35896698bf"
     },
     "tests/harness.py": {
       "bench_sha256": "ca75ba011d8e8176f18ea9cc34ea791d1322524385dffe90a37d6a3269816d0f",
