@@ -57,6 +57,12 @@
 #   FAKE_SSH_EXIT_LOG       append a line when `-O exit` is received
 #   FAKE_SSH_CMD_LOG        append the full text of every multiplexed command that
 #                          was received, one per line (what the "router" was sent)
+#   FAKE_SSH_LINK_DOWN      a PATH. While that file exists the LINK to the device is
+#                          down, and only the link: `-O check` / `-O exit` are still
+#                          answered by the LOCAL master, a multiplexed command fails
+#                          (exit 255, broken channel) and a new master cannot connect
+#                          (exit 255, connect timeout). Remove the file to restore
+#                          the link.
 #   FAKE_SSH_EXTRA          compose a SECOND, independent fault with the mode. It is
 #                           honoured by the two branches where a combination is
 #                           genuinely needed (the artifact transfer and the reporter
@@ -119,6 +125,26 @@ for ((i=0; i<${#args[@]}; i++)); do
 done
 
 last="${args[${#args[@]}-1]}"
+
+# ---- link-loss emulation ---------------------------------------------------
+# While the FAKE_SSH_LINK_DOWN file exists the LINK to the device is down - and
+# ONLY the link. The control master is a LOCAL process: `-O check` and `-O exit`
+# talk to it over its own socket and never reach the device, so they were answered
+# above, exactly as on a healthy link. That is the property this models, and the
+# reason a passing `-O check` says nothing about whether the device is reachable.
+#   * a multiplexed command reaches the master, the master cannot reach its peer,
+#     and the client reports the broken channel;
+#   * a NEW master cannot connect at all.
+# Real OpenSSH may instead leave the command hanging until a keepalive or a local
+# deadline ends it; this is the variant in which the master has already noticed.
+if [ -n "${FAKE_SSH_LINK_DOWN:-}" ] && [ -e "$FAKE_SSH_LINK_DOWN" ]; then
+  case "$last" in
+    *@*) echo "ssh: connect to host 192.0.2.1 port 22: Operation timed out" 1>&2 ;;
+    *)   if [ -n "${FAKE_SSH_CMD_LOG:-}" ]; then printf '%s\n' "$last" >> "$FAKE_SSH_CMD_LOG"; fi
+         echo "mux_client_request_session: read from master failed: Broken pipe" 1>&2 ;;
+  esac
+  exit 255
+fi
 
 # Emulate an unreachable / auth-failing host. This is checked BEFORE the master
 # branch because that is where the real ssh client decides these: authentication
