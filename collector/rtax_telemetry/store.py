@@ -105,7 +105,14 @@ class Store:
                  retain_sample_bytes=DEFAULT_RETAIN_SAMPLE_BYTES,
                  retain_outcome_bytes=DEFAULT_RETAIN_OUTCOME_BYTES,
                  max_sample_bytes=DEFAULT_MAX_SAMPLE_BYTES, log=None):
-        self.dir = Path(os.path.expanduser(str(data_dir)))
+        # The data directory is resolved to an ABSOLUTE path at construction. Sample
+        # file names are wall-clock timestamps and were previously persisted exactly
+        # as the operator spelled the data dir, so a RELATIVE `--data-dir` recorded a
+        # relative sample path: the state pointer could then only be reopened from the
+        # same working directory, and from anywhere else the predecessor silently
+        # became `first`. `resolve_sample_path()` below keeps OLDER relative records
+        # readable too.
+        self.dir = Path(os.path.abspath(os.path.expanduser(str(data_dir))))
         self.samples_dir = self.dir / "samples"
         self.outcomes_path = self.dir / "outcomes.jsonl"
         self.pending_cleanup_path = self.dir / "pending_cleanup.jsonl"
@@ -250,6 +257,30 @@ class Store:
                 return doc
         return None
 
+    def resolve_sample_path(self, path):
+        """Locate a RECORDED sample path independent of the current working dir.
+
+        A record may carry a RELATIVE path (older versions persisted the path exactly
+        as given, so a relative `--data-dir` produced e.g.
+        ``data-acceptance-1.5.2.l40vi7bh/samples/2026...json``). That string can only
+        be reopened from the working directory it was written in; the SAME file is
+        reached CWD-independently by resolving its basename inside THIS store's own
+        samples directory. The state-selected sample is preserved - this NEVER
+        substitutes the lexicographically newest file, which is the wrong predecessor
+        after a clock step.
+
+        Returns an existing path (as an absolute string) or None.
+        """
+        if not path:
+            return None
+        candidates = [str(path)]
+        if not os.path.isabs(str(path)):
+            candidates.append(str(self.samples_dir / os.path.basename(str(path))))
+        for cand in candidates:
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
+        return None
+
     def _state_sample_path(self):
         try:
             state = self.load_state()
@@ -257,7 +288,7 @@ class Store:
             return None
         meta = state.get("last_valid_sample") if isinstance(state, dict) else None
         if isinstance(meta, dict) and meta.get("path"):
-            return meta["path"]
+            return self.resolve_sample_path(meta["path"])
         return None
 
     def last_sample_path(self):

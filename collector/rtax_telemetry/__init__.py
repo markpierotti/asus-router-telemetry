@@ -18,6 +18,6 @@ status      the human-readable status command
 cli         argument parsing / process entry points
 """
 
-COLLECTOR_VERSION = "1.5.2"
+COLLECTOR_VERSION = "1.5.3"
 SAMPLE_SCHEMA = "rtax_telemetry.sample/1"
 STATE_SCHEMA = "rtax_telemetry.state/1"

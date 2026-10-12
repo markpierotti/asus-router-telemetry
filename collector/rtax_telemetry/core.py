@@ -29,6 +29,7 @@ retry forever against an endpoint whose identity is not established.
 """
 
 import json
+import os
 import time
 
 from . import COLLECTOR_VERSION, SAMPLE_SCHEMA, STATE_SCHEMA
@@ -197,6 +198,7 @@ class Collector:
         self.cleanup_interrupted = False  # teardown was cancelled; removal UNCONFIRMED
         self.lifecycle_error = None     # master shutdown could not be confirmed
         self.persistence_error = None   # set when evidence could NOT be written
+        self._teardown_recorded = False  # the teardown record is written at most once
 
     # ------------------------------------------------------------- sessions
     def _ensure_session(self):
@@ -221,6 +223,14 @@ class Collector:
     def _drop_session(self):
         session, self._session = self._session, None
         if session is None:
+            # No live session to tear down - but a FAILED PROVISION may still have
+            # left an unconfirmed control-master shutdown behind: `transport.start()`
+            # stops its own master before it lets any exception out, including the
+            # provisioning failures, and records the verdict as `lifecycle_error` on
+            # the transport. Lift it HERE as well as on the live-session path, so the
+            # verdict becomes durable lifecycle evidence instead of only a log line.
+            # (For a live session the capture runs in the `finally` below.)
+            self._capture_transport_lifecycle()
             return
         self._last_session = session
         try:
@@ -290,12 +300,18 @@ class Collector:
         """Lift the transport's master-shutdown verdict into the collector.
 
         Called even when teardown raised, so an interrupted teardown still records
-        what happened to the control master.
+        what happened to the control master. It is IDEMPOTENT: the verdict is stored
+        and logged only when it CHANGES, so the several teardown paths (a live drop, a
+        failed provision's early return, ``close()``) cannot log the same verdict
+        repeatedly. The verdict itself is sticky by design - an unconfirmed master is
+        a durable fact, not a per-attempt one.
         """
         err = getattr(self.transport, "lifecycle_error", None)
         if err:
-            self.lifecycle_error = sanitize_detail(err)
-            self.log("master shutdown: %s" % self.lifecycle_error)
+            err = sanitize_detail(err)
+            if err != self.lifecycle_error:
+                self.lifecycle_error = err
+                self.log("master shutdown: %s" % self.lifecycle_error)
 
     def close(self):
         """Tear down and persist whatever could not be confirmed.
@@ -303,11 +319,20 @@ class Collector:
         The teardown record is written from a ``finally``, so it is written even when
         ``_drop_session`` re-raises a cancellation. Nothing here turns a cancellation
         or an unconfirmed teardown into success.
+
+        The record is written AT MOST ONCE per run: in ``--loop`` mode the loop's
+        ``finally`` AND the CLI's own ``finally`` both call ``close()``, and without
+        this guard one failed final cleanup was recorded twice - two ``teardown``
+        records and two ``pending_cleanup`` entries for the SAME directory. Genuine,
+        separate failure events (an attempt's pending-cleanup entry, a different
+        directory) are unaffected: they are written elsewhere and are not deduplicated.
         """
         try:
             self._drop_session()
         finally:
-            if self.cleanup_error or self.lifecycle_error:
+            if ((self.cleanup_error or self.lifecycle_error)
+                    and not self._teardown_recorded):
+                self._teardown_recorded = True
                 self._note_teardown_failure()
 
     def _note_teardown_failure(self):
@@ -364,7 +389,17 @@ class Collector:
                     la["lifecycle_error"] = lifecycle_detail
                 self.store.write_state(state)
             else:
-                problems.append("no last attempt in state to annotate")
+                # There is NO attempt record to annotate. That is the NORMAL case for
+                # a cancellation during the FIRST-EVER provisioning: the attempt was
+                # never classified, so no `last_attempt` exists yet. It is NOT a
+                # persistence failure - the durable `teardown` record above (and the
+                # pending-cleanup entry, when a directory is unconfirmed) ARE written -
+                # so it is reported as information, not as `EVIDENCE NOT PERSISTED`.
+                # A genuine failure to WRITE (the `except` branches below) is still a
+                # reported problem.
+                self.log("teardown recorded with no attempt state to annotate yet "
+                         "(no last_attempt is present; e.g. a cancelled first-ever "
+                         "provision)")
         except Exception as e:                      # noqa: BLE001
             problems.append("state not updated (%s)" % e)
 
@@ -652,10 +687,32 @@ class Collector:
         meta = state.get("last_valid_sample")
         if not isinstance(meta, dict) or not meta.get("path"):
             return None, None
+        # Locate the state-selected sample CWD-INDEPENDENTLY. A record written by an
+        # older version may carry a RELATIVE path, which could only be reopened from
+        # the working directory it was written in; resolving it against this store's
+        # samples directory keeps the SAME sample (never the lexicographically newest,
+        # which is the wrong predecessor after a clock step).
+        located = None
+        if hasattr(self.store, "resolve_sample_path"):
+            located = self.store.resolve_sample_path(meta["path"])
+        if located is None:
+            # Fall back to the recorded string verbatim (an absolute path, or a
+            # RELATIVE one opened from the directory it was written in).
+            if os.path.isfile(meta["path"]):
+                located = meta["path"]
+        if located is None:
+            # Report it rather than silently deriving a `first`-sample state: the
+            # predecessor pointer exists but the file it names could not be located.
+            self.log("predecessor sample %s could not be located - treating this as a "
+                     "FIRST sample (derived rates will read null until one exists)"
+                     % sanitize_detail(str(meta["path"])))
+            return None, meta
         try:
-            with open(meta["path"]) as fh:
+            with open(located) as fh:
                 prev = json.load(fh)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as e:
+            self.log("predecessor sample %s could not be read (%s) - treating this as a "
+                     "FIRST sample" % (sanitize_detail(str(located)), e))
             return None, meta
         if not isinstance(prev, dict):
             return None, meta
