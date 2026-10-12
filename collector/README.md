@@ -1,6 +1,6 @@
 # Foreground telemetry collector
 
-Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.3.0. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
+Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.4.0. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
 
 Requires macOS or a POSIX host with Python 3.11+ and OpenSSH for live use. It remains a foreground process; it creates no scheduled jobs, services or startup hooks.
 
@@ -52,6 +52,10 @@ Device output is drained incrementally under explicit byte ceilings (`max_stdout
 Provisioning gates are hard stops: the required-tool probe must exit 0 and return exactly one well-formed marker showing no missing tools, and the watchdog self-test must show the watchdog's own SIGKILL status, positive evidence its timer fired, and an elapsed time within tolerance of the bound — a crash such as SIGSEGV (139), a bare status 137, or a printed success line is not accepted. All of these stop provisioning before any remote directory is created or anything is executed.
 
 Full outcome taxonomy: `success` · `malformed_data` · `schema_invalid` · `timeout` · `reporter_failure` · `ssh_auth_failure` · `ssh_hostkey_mismatch` · `unreachable` · `artifact_mismatch` · `transport_error` · `output_overflow` · `storage_error`.
+
+Numeric input is contained too. Numbers are checked against the range each reporter field can actually take (64-bit counters, uptime below 1e12 s, load below 1e9), and the predicates are safe for arbitrary-size JSON integers — a value such as `1e400`-scale integer is rejected as `schema_invalid`, never allowed to raise. A numeric literal whose exponent overflows to a non-finite double (`1e999` → `inf`), even in an unknown/extra field, is rejected at parse as `malformed_data`. Stored samples, outcomes and state are serialised as strict JSON (`allow_nan=False`), so a non-standard `Infinity`/`NaN` token can never be written. A rejected response is a classified failed attempt, and the same collector still accepts the next good response.
+
+The transferred artifact is written to the child over a non-blocking pipe: because selector readiness does not guarantee a whole chunk fits, a slow or partial reader cannot make the write overrun the deadline. Partial writes, backpressure, broken pipes and empty input are all handled while stdout/stderr are drained and the deadline is checked.
 
 ## Validation boundary
 

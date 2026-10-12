@@ -22,7 +22,7 @@ The previous hardware-tested artifact is preserved for provenance only:
 b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.0.2)
 ```
 
-Collector base version: 1.3.0. [Import manifest](import-manifest.json) records the bench-file and portable-copy hashes; only deliberate configuration differences (bench target, data dir, artifact/known_hosts defaults, documentation addresses) remain. Apt packages remain unpinned, so rebuilt artifact hashes may differ.
+Collector base version: 1.4.0. [Import manifest](import-manifest.json) records the bench-file and portable-copy hashes; only deliberate configuration differences (bench target, data dir, artifact/known_hosts defaults, documentation addresses) remain. Apt packages remain unpinned, so rebuilt artifact hashes may differ.
 
 ## Remediation revision (2026-10-12)
 
@@ -40,6 +40,19 @@ An independent review (`report.md`, `artifacts/code-review.md`) reported two low
 | C6 | Schema accepted NaN/Infinity, booleans-as-numbers and out-of-range values (`schema.py`) | Reject non-standard constants; require finite, in-range numbers; reject booleans |
 
 Verification: the reporter's edge cases (C4/C5) were reproduced and fixed at the C level and pass on both the native and the ARM build under QEMU; the collector findings (S1/S2/C1/C2/C3/C6) each have a behavioural test in `collector/tests/test_fixes.py`. The nested-JSON failure was reported on Python 3.11.16; only Python 3.13.1 was available here, so that interpreter-specific path is covered by the nesting-budget test rather than by reproducing 3.11's exact recursion limit.
+
+## Second remediation revision (2026-10-12)
+
+A follow-up independent review (Codex and Claude Code) raised three numeric-input defects and one transport timing defect. Reporter source is UNCHANGED (still v1.0.3, hash above), so no ARM artifact was rebuilt. All four were fixed in both copies, each with a regression test driving the real mechanism:
+
+| # | Defect (source location) | Fix |
+| --- | --- | --- |
+| N1 | A huge integer for `host.uptime_seconds` / `loadavg.*` (`10**400`) made `_is_finite_num` call `math.isfinite` on an int and raise `OverflowError`, escaping the classifier (`schema.py`) | Only floats are passed to `math.isfinite`; every numeric field is range-bounded to what the reporter can emit (64-bit counters, uptime < 1e12 s, load < 1e9); oversized values are `schema_invalid`, not a crash |
+| N2 | A huge CPU counter made `cpu.py` raise `OverflowError` at `100.0 * (dt - di) / dt` (`cpu.py`) | The ratio `(dt - di) / dt` is computed before scaling by 100, which is safe for arbitrary-size ints; `detect_reboot` avoids coercing a big int through a float operand |
+| N3 | A numeric literal whose exponent overflows to `inf` (`1e999`) bypassed `parse_constant` in an extra field, and the sample was stored with the non-standard token `Infinity` (`schema.py`, `store.py`) | A `parse_float` hook rejects non-finite float literals at parse (`malformed_data`); samples/outcomes/state are serialised with `allow_nan=False` |
+| T1 | `transport._drain_bounded` wrote up to 64 KiB to a blocking stdin pipe after selector readiness, so a slow/partial reader could overrun the deadline (`transport.py`) | The write end is set non-blocking; partial writes, `EAGAIN` (keep registered, keep draining, keep checking the deadline), broken pipes and empty input are all handled |
+
+Verification: 137 tests pass on Python 3.11.16 and 3.13.1 (was 116); the partial-reader reproducer now returns within the deadline (0.2 s bound, ~0.2 s elapsed, previously ~2.0 s). The stored JSON, outcome classification and bad-input-then-good-input recovery are asserted. Both copies pass the full suite; `smoke_loop.sh` and `demo_offline.sh` still exit cleanly.
 
 ## Prior investigation
 
@@ -62,7 +75,7 @@ The [collector hardware record](collector-hardware-test.md) records two real col
 
 Executed for the portable repository update:
 
-- `make test` passed on macOS: five embedded reporter groups, compact/pretty JSON, 29 fixture assertions, the reporter edge tests, and 116 collector tests (115 passed, one skipped). The controlling-PTY input tests passed with local terminal access.
+- `make test` passed on macOS: five embedded reporter groups, compact/pretty JSON, 29 fixture assertions, the reporter edge tests, and 137 collector tests (136 passed, one skipped). The controlling-PTY input tests passed with local terminal access.
 - The remediation revision was verified end to end on this host: the ARM artifact built with `sh build-arm.sh` passed its embedded groups, the fixture assertions and the reporter edge tests under QEMU.
 - Packaged mock CLI, foreground-loop shutdown (exit 130 and lock release) and scenario demo passed.
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
