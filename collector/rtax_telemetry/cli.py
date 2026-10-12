@@ -13,7 +13,9 @@ ssh transport. Nothing is installed as a service, cron job or background job.
 import argparse
 import fcntl
 import json
+import math
 import os
+import signal
 import sys
 import time
 import traceback
@@ -24,6 +26,7 @@ from .core import (
     OUTCOME_SUCCESS,
     OUTCOME_TEXT,
     default_state,
+    is_hard_stop,
 )
 from .errors import LockHeld, TelemetryError, TransportError
 from .mock import ScenarioTransport, SCENARIOS
@@ -39,6 +42,7 @@ from .transport import (
     DEFAULT_KNOWN_HOSTS,
     DEFAULT_MAX_STDERR,
     DEFAULT_MAX_STDOUT,
+    DEFAULT_CONTROL_PERSIST,
     EXPECT_ARTIFACT_SHA,
     EXPECT_KNOWN_HOSTS_SHA,
     SSHTransport,
@@ -48,12 +52,93 @@ DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 DEFAULT_HOST = None
 DEFAULT_USER = None
 
+# The loop must not spin: an interval below this would hammer sshd with attempts.
+MIN_INTERVAL = 1.0
+
+# Exit codes (documented in the README).
+EXIT_OK = 0
+EXIT_COLLECTION_FAILURE = 1
+EXIT_BAD_OPTION = 2
+EXIT_LOCK_HELD = 3
+EXIT_CLEANUP_FAILURE = 5
+EXIT_EVIDENCE_NOT_PERSISTED = 6
+EXIT_INTERRUPTED = 130
+
 _lock_fd = None
+_stderr_broken = False
 
 
 def log(msg):
-    sys.stderr.write("%s\n" % msg)
-    sys.stderr.flush()
+    """Write one diagnostic line to stderr.
+
+    A closed or broken stderr must NEVER abort teardown bookkeeping: the write
+    failure is recorded and swallowed HERE, so no caller -- least of all the
+    cleanup path -- can be turned into an exception by an unreadable terminal.
+    """
+    global _stderr_broken
+    try:
+        sys.stderr.write("%s\n" % msg)
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        _stderr_broken = True
+
+
+def stderr_is_broken():
+    return _stderr_broken
+
+
+def validate_interval(interval, control_persist):
+    """Reject an interval the loop cannot honour.
+
+    ``--interval 0`` (or a NaN) previously produced a hot loop against sshd, and an
+    interval at or above ``ControlPersist`` lets the control master idle-expire
+    between attempts -- which is one of the ways the master is lost.
+    """
+    if not isinstance(interval, (int, float)) or isinstance(interval, bool) \
+            or not math.isfinite(interval):
+        raise TransportError("--interval must be a finite number of seconds (got %r)"
+                             % (interval,))
+    if interval < MIN_INTERVAL:
+        raise TransportError("--interval must be at least %gs (got %r) - a smaller "
+                             "value would hammer the target" % (MIN_INTERVAL, interval))
+    if control_persist and interval >= control_persist:
+        raise TransportError(
+            "--interval (%gs) must be below ControlPersist (%gs): otherwise the ssh "
+            "control master idle-expires between attempts and every other attempt "
+            "loses its master" % (interval, control_persist))
+    return interval
+
+
+def install_stop_handlers():
+    """Route SIGHUP and SIGTERM to the orderly path in BOTH modes.
+
+    Without this, closing the terminal tab (SIGHUP) or ``kill`` (SIGTERM in
+    ``--once`` mode) skipped teardown entirely: the remote directory stayed, the
+    authenticated master lingered until its idle timeout, the local control-socket
+    directory stayed and NOTHING was recorded. SIGINT already raises
+    KeyboardInterrupt by default. Returns a list for ``restore_stop_handlers``.
+    """
+    def _raise(_signum, _frame):
+        raise KeyboardInterrupt
+
+    installed = []
+    for name in ("SIGHUP", "SIGTERM"):
+        sig = getattr(signal, name, None)
+        if sig is None:                                # pragma: no cover - non-POSIX
+            continue
+        try:
+            installed.append((sig, signal.signal(sig, _raise)))
+        except (ValueError, OSError, RuntimeError):    # not the main thread
+            pass
+    return installed
+
+
+def restore_stop_handlers(installed):
+    for sig, old in installed:
+        try:
+            signal.signal(sig, old)
+        except (ValueError, OSError, RuntimeError):
+            pass
 
 
 # --------------------------------------------------------------------- config
@@ -84,13 +169,26 @@ def cfg_get(args, cfg, name, default):
 # ----------------------------------------------------------------------- lock
 def acquire_lock(store):
     global _lock_fd
-    store.dir.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(store.lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    store.ensure()
+    flags = os.O_CREAT | os.O_RDWR
+    # O_NOFOLLOW: the lock path must not be a SYMLINK. Following one would let
+    # anything that can write the data directory redirect the open (and the
+    # ftruncate below) at an arbitrary file; a symlink here is refused instead.
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(str(store.lock_path), flags, 0o600)
+    except OSError as e:
+        raise LockHeld("cannot open the lock file %s: %s" % (store.lock_path, e))
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
         raise LockHeld("another collector run already owns %s" % store.dir)
+    try:
+        os.chmod(str(store.lock_path), 0o600)
+    except OSError:
+        pass
     os.ftruncate(fd, 0)
     os.write(fd, ("%d\n" % os.getpid()).encode())
     _lock_fd = fd
@@ -132,6 +230,7 @@ def build_transport(args, cfg):
         ssh_bin=cfg_get(args, cfg, "ssh", "ssh"),
         connect_timeout=cfg_get(args, cfg, "connect_timeout", 8),
         run_bound=cfg_get(args, cfg, "run_bound", 15),
+        control_persist=cfg_get(args, cfg, "control_persist", DEFAULT_CONTROL_PERSIST),
         watchdog_selftest=cfg_get(args, cfg, "watchdog_selftest", True),
         watchdog_selftest_bound=cfg_get(args, cfg, "watchdog_selftest_bound", 3),
         interactive_auth=cfg_get(args, cfg, "interactive_auth", None),
@@ -152,6 +251,7 @@ def build_store(args, cfg):
         retain_outcome_bytes=cfg_get(args, cfg, "retain_outcome_bytes",
                                      DEFAULT_RETAIN_OUTCOME_BYTES),
         max_sample_bytes=cfg_get(args, cfg, "max_sample_bytes", DEFAULT_MAX_SAMPLE_BYTES),
+        log=log,
     )
 
 
@@ -170,35 +270,63 @@ def build_collector(args, cfg, transport, store, host_label):
 def cmd_collect(args):
     cfg = load_config(args.data_dir)
     store = build_store(args, cfg)
-    store.ensure()
+    try:
+        store.ensure()
+    except TelemetryError as e:
+        log("FATAL: %s" % e)
+        return EXIT_EVIDENCE_NOT_PERSISTED
 
     interval = float(cfg_get(args, cfg, "interval", 60.0))
+    want_loop = bool(getattr(args, "loop", False))
+    if want_loop:
+        try:
+            interval = validate_interval(
+                interval, float(cfg_get(args, cfg, "control_persist", DEFAULT_CONTROL_PERSIST)))
+        except TelemetryError as e:
+            log("FATAL: %s" % e)
+            return EXIT_BAD_OPTION
+
     transport, host_label = build_transport(args, cfg)
 
     try:
         acquire_lock(store)
     except LockHeld as e:
         log("FATAL: %s" % e)
-        return 3
+        return EXIT_LOCK_HELD
+    except TelemetryError as e:
+        log("FATAL: %s" % e)
+        return EXIT_LOCK_HELD
 
     collector = build_collector(args, cfg, transport, store, host_label)
-    rc = 0
+    # SIGHUP/SIGTERM must reach the SAME orderly path as Ctrl-C in BOTH modes.
+    installed = install_stop_handlers()
+    rc = EXIT_OK
     try:
-        if args.loop:
+        if want_loop:
             rc = run_loop(collector, store, interval)
         else:
             attempt = collector.collect_once()
             report_attempt(attempt)
-            rc = 0 if (attempt["outcome"] == OUTCOME_SUCCESS
-                       and attempt.get("cleanup_ok", True)) else 1
+            rc = EXIT_OK if (attempt["outcome"] == OUTCOME_SUCCESS
+                             and attempt.get("cleanup_ok", True)) else EXIT_COLLECTION_FAILURE
+    except KeyboardInterrupt:
+        log("interrupted: stopping cleanly")
+        rc = EXIT_INTERRUPTED
     finally:
+        restore_stop_handlers(installed)
         collector.close()
         release_lock()          # scoped release: always drop the data-dir lock
     # A cleanup failure is surfaced separately and never masks an original failure.
     if collector.cleanup_error:
         log("cleanup: SEPARATE FAILURE: %s" % collector.cleanup_error)
-        if rc == 0:
-            rc = 5
+        if rc == EXIT_OK:
+            rc = EXIT_CLEANUP_FAILURE
+    # ... and so is a failure to WRITE the evidence. Never report success when the
+    # record could not be stored.
+    if collector.persistence_error:
+        log("EVIDENCE NOT PERSISTED: %s" % collector.persistence_error)
+        if rc == EXIT_OK:
+            rc = EXIT_EVIDENCE_NOT_PERSISTED
     return rc
 
 
@@ -210,26 +338,35 @@ def report_attempt(attempt):
         log("  detail: %s" % attempt["detail"])
     if attempt.get("sample_path"):
         log("  sample: %s" % attempt["sample_path"])
+    if attempt.get("remote_dir"):
+        log("  remote dir: %s (ownership=%s)" % (
+            attempt["remote_dir"], attempt.get("remote_ownership")))
     if attempt.get("cleanup_ok") is False:
-        log("  cleanup: FAILED: %s" % attempt.get("cleanup_detail"))
+        log("  cleanup: NOT CONFIRMED: %s" % attempt.get("cleanup_detail"))
 
 
 def run_loop(collector, store, interval):
-    import signal
+    """Foreground collection loop.
 
+    SIGHUP/SIGTERM are routed to the orderly path by ``install_stop_handlers`` in
+    ``cmd_collect`` (both modes), so this function does not install its own.
+    """
     log("foreground loop starting: interval=%ss, data dir=%s" % (interval, store.dir))
     log("press Ctrl-C to stop cleanly")
     base = time.monotonic()
     i = 0
-
-    def _term(_signum, _frame):
-        raise KeyboardInterrupt
-
-    old_term = signal.signal(signal.SIGTERM, _term)
     try:
         while True:
             attempt = collector.collect_once()
             report_attempt(attempt)
+            if is_hard_stop(attempt["outcome"]):
+                # A pinned-identity or artifact-gate failure is not transient:
+                # retrying against an endpoint whose identity is not established
+                # cannot fix it, so the loop STOPS instead of accumulating evidence
+                # of a mismatch it will never recover from by itself.
+                log("HARD STOP: %s is not retryable - stopping the loop without further "
+                    "attempts" % attempt["outcome"])
+                return EXIT_COLLECTION_FAILURE
             i += 1
             target = base + i * interval
             now = time.monotonic()
@@ -245,11 +382,10 @@ def run_loop(collector, store, interval):
                 remaining = target - time.monotonic()
     except KeyboardInterrupt:
         log("interrupted (Ctrl-C): stopping cleanly")
-        return 130
+        return EXIT_INTERRUPTED
     finally:
-        signal.signal(signal.SIGTERM, old_term)
         collector.close()
-    return 0
+    return EXIT_OK
 
 
 def cmd_status(args):
@@ -365,6 +501,9 @@ def add_transport(p):
     p.add_argument("--artifact", default=None)
     p.add_argument("--known-hosts", dest="known_hosts", default=None)
     p.add_argument("--connect-timeout", type=int, default=None)
+    p.add_argument("--control-persist", dest="control_persist", type=float, default=None,
+                   help="seconds an idle control master is kept (default %d); a loop "
+                        "interval at or above this is refused" % DEFAULT_CONTROL_PERSIST)
     p.add_argument("--run-bound", type=int, default=None, help="seconds allowed for the reporter")
     p.add_argument("--watchdog-selftest", dest="watchdog_selftest", action="store_true",
                    default=None, help="prove the remote watchdog bounds before use (default on)")
@@ -375,7 +514,10 @@ def add_transport(p):
     p.add_argument("--interactive-auth", dest="interactive_auth", action="store_true",
                    default=None, help="force interactive terminal authentication")
     p.add_argument("--no-interactive-auth", dest="interactive_auth", action="store_false",
-                   default=None, help="never take over the terminal (key auth only)")
+                   default=None, help="never take over the terminal for a password prompt. "
+                                      "This transport DISABLES public-key authentication "
+                                      "(PubkeyAuthentication=no), so with no interactive "
+                                      "prompt a NEW master cannot be established at all")
     p.add_argument("--max-stdout-bytes", type=int, default=None,
                    help="device stdout byte ceiling (default %d)" % DEFAULT_MAX_STDOUT)
     p.add_argument("--max-stderr-bytes", type=int, default=None,
@@ -423,9 +565,12 @@ def main(argv=None):
         return args.func(args)
     except TelemetryError as e:
         log("FATAL: %s" % e)
-        return 1
+        return EXIT_COLLECTION_FAILURE
     except BrokenPipeError:
-        return 0
+        # A closed output pipe must NOT be reported as success: the diagnostics and
+        # the exit status are the operator's only evidence that a run happened.
+        log("FATAL: output pipe was closed before the run finished")
+        return EXIT_COLLECTION_FAILURE
     except Exception:                                   # noqa: BLE001
         log("UNEXPECTED ERROR:\n" + traceback.format_exc())
         return 70

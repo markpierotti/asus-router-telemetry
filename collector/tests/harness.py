@@ -58,10 +58,11 @@ def make_wrapper(workdir, mode, name="fake-ssh", extra_env=None):
 def make_transport(workdir, mode="ok", *, artifact=None, known_hosts=None,
                    artifact_sha=None, known_hosts_sha=None, verify_artifact=True,
                    run_bound=5, connect_timeout=5, watchdog_selftest=True,
-                   watchdog_selftest_bound=2, interactive_auth=False, log=None):
+                   watchdog_selftest_bound=2, interactive_auth=False, log=None,
+                   extra_env=None):
     artifact = artifact or make_artifact(workdir)
     known_hosts = known_hosts or make_known_hosts(workdir)
-    wrapper = make_wrapper(workdir, mode)
+    wrapper = make_wrapper(workdir, mode, extra_env=extra_env)
     return SSHTransport(
         "192.0.2.1", "routeradmin",
         artifact=artifact,

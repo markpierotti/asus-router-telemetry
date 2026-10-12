@@ -1,0 +1,82 @@
+{
+  "cpu": null,
+  "cpu_stat": {
+    "cpu": {
+      "idle": 4,
+      "iowait": 5,
+      "irq": 6,
+      "nice": 2,
+      "softirq": 7,
+      "steal": 8,
+      "system": 3,
+      "user": 1
+    },
+    "cpu0": {
+      "idle": 4,
+      "iowait": 5,
+      "irq": 6,
+      "nice": 2,
+      "softirq": 7,
+      "steal": 8,
+      "system": 3,
+      "user": 1
+    }
+  },
+  "filesystems": [
+    {
+      "avail_bytes": 12687126528,
+      "available": true,
+      "free_bytes": 12687126528,
+      "inodes": 124381734,
+      "inodes_free": 123897720,
+      "path": "/",
+      "total_bytes": 245107195904,
+      "used_bytes": 232420069376,
+      "used_percent": 95
+    }
+  ],
+  "host": {
+    "boot_time": 1700000000,
+    "machine": "arm64",
+    "release": "27.0.0",
+    "sysname": "Darwin",
+    "uptime_seconds": 900.0
+  },
+  "limits": {
+    "file_read_max_bytes": 4194304,
+    "files_truncated": 0,
+    "mounts_max": 512,
+    "mounts_overlong": 0,
+    "mounts_seen": 1,
+    "mounts_truncated": false
+  },
+  "loadavg": null,
+  "memory_kb": {
+    "Buffers": 1,
+    "Cached": 2,
+    "MemAvailable": 233476,
+    "MemFree": 303060,
+    "MemTotal": 510456,
+    "SwapFree": 0,
+    "SwapTotal": 0
+  },
+  "schema": "router_health/2",
+  "storage": {
+    "candidates": [],
+    "candidates_count": 0,
+    "duplicate_records_dropped": 0,
+    "note": "candidates are block-device-backed mounts; block-backed does not establish USB identity",
+    "placeholders_excluded": 0
+  },
+  "tool": "router_health",
+  "units": {
+    "boot_time": "epoch seconds, from /proc/stat btime (boot identity)",
+    "capacity": "bytes",
+    "cpu_stat": "USER_HZ jiffies, cumulative counters (needs 2 samples)",
+    "load*": "1-min/5-min/15-min runnable average",
+    "memory_kb": "kB (Linux kB = 1024 bytes)",
+    "uptime_seconds": "s",
+    "used_percent": "ceil(used/(used+avail)), df-compatible"
+  },
+  "version": "1.0.4"
+}

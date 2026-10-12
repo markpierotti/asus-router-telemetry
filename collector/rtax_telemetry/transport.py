@@ -18,6 +18,13 @@ launchers in ``the original private bench project`` (``run_reporter_test.sh``,
   * a single ControlMaster connection (one password prompt) reused for every
     command, then torn down; its resources are released even when the connection
     is never established
+  * a liveness GATE before every multiplexed command (`ssh -O check`), so a lost
+    master becomes an explicit classified error instead of a silent fallback to a
+    fresh direct connection that would need interactive authentication
+  * master shutdown that is VERIFIED (`-O check` after `-O exit`), never inferred
+    from the absence of an error
+  * a hermetic ssh option set (`-F /dev/null`, no agent/forwarding/proxy) so the
+    connection cannot be altered by ambient OpenSSH configuration
 
 Host-side execution notes (each is a correctness requirement, not a nicety):
 
@@ -59,13 +66,16 @@ except ImportError:        # pragma: no cover
 from .errors import (
     ArtifactMismatch,
     CleanupError,
+    ControlMasterLost,
     OutputLimitExceeded,
+    ProvisioningError,
     RemoteCommandError,
     RemoteTimeout,
     TransportAuthError,
     TransportError,
     TransportHostKeyError,
     TransportUnreachableError,
+    sanitize_detail,
 )
 
 DEFAULT_ARTIFACT = os.path.abspath(os.path.join(
@@ -81,11 +91,23 @@ OPENSSL_KAT_ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f2001
 _KILLED_FROM = 128
 # The watchdog terminates its target with SIGKILL (kill -9) -> 128 + 9.
 _WD_SIGKILL_STATUS = 137
+# A remote script whose own signal trap fired exits 129 (HUP/INT/TERM); 130 and 143
+# are SIGINT and SIGTERM. None of these is positive evidence that the watchdog
+# TIMER fired, so they are reported as command failures, never as the bound.
+_SCRIPT_TRAP_STATUS = 129
+_SIGNAL_STATUSES = (129, 130, 143)
 # The self-test must land within this window around the configured bound, and must
 # show POSITIVE evidence the timer fired. A bare "status >= 128" (which would also
 # accept a crash such as SIGSEGV 139) is deliberately NOT accepted.
 _SELFTEST_LOWER_TOL = 0.5      # seconds below the bound that still count
 _SELFTEST_UPPER_TOL = 3.0      # seconds above the bound that still count
+
+# Local bound for `ssh -O check`, the cheap control-master liveness probe.
+_MASTER_CHECK_BOUND = 10
+
+# How long an idle control master is kept alive. Exposed so the CLI can refuse a
+# loop interval at or above it (the master would idle-expire between attempts).
+DEFAULT_CONTROL_PERSIST = 900
 
 # Byte ceilings for device output. Enforced WHILE RECEIVING (before any full
 # buffering), so an authenticated-but-hostile endpoint cannot exhaust host memory.
@@ -120,6 +142,11 @@ def _cancel(pid_file):
     trap, so a HUP/INT/TERM on the remote shell (for example the ssh channel being
     closed or the local watchdog killing ssh) cannot leave children running on the
     target. `${p:-}` / `${w:-}` keep it safe when the variables are not set yet.
+
+    SOURCE-DERIVED, NOT HARDWARE-VERIFIED: that the target's shell delivers a trap
+    when the ssh channel closes has not been exercised on this unit's BusyBox ash /
+    dropbear combination. The trap is a best-effort second line of defence; the
+    normal path does not depend on it.
     """
     return ('kill -9 ${p:-} ${w:-} 2>/dev/null; '
             'if [ -f "%s" ]; then kill -9 "$(cat "%s")" 2>/dev/null; rm -f "%s"; fi'
@@ -226,6 +253,45 @@ def has_controlling_terminal():
         return False
     os.close(fd)
     return True
+
+
+def _child_env():
+    """A minimal environment for an ssh child process.
+
+    An inherited ``SSH_ASKPASS`` / ``SSH_ASKPASS_REQUIRE`` would let ssh obtain a
+    password from an external helper program instead of the operator's terminal,
+    so those variables (and ``SSH_ORIGINAL_COMMAND``) are removed. The password
+    can then only come from /dev/tty, typed by the operator.
+    """
+    env = dict(os.environ)
+    for k in list(env):
+        if k.startswith("SSH_ASKPASS") or k == "SSH_ORIGINAL_COMMAND":
+            env.pop(k, None)
+    return env
+
+
+def _last_token(raw):
+    """The last whitespace-separated token of a device reply, or "".
+
+    The device controls these bytes. ``text.split()`` returns [] for a reply that
+    is empty OR made only of whitespace-like characters (including bytes that
+    decode to U+00A0/U+2028 and control bytes such as 0x1C), so the result is
+    indexed only after the empty case is handled. Reading ``[-1]`` on the raw
+    split would raise IndexError and lose the attempt.
+    """
+    toks = _tokens(raw)
+    return toks[-1] if toks else ""
+
+
+def _tokens(raw):
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8", "replace")
+    return str(raw).split()
+
+
+def _oneline(raw, limit=200):
+    """A bounded, terminal-safe single-line rendering of captured device bytes."""
+    return sanitize_detail(raw, limit=limit)
 
 
 class _TerminalHandover:
@@ -455,7 +521,8 @@ def _drain_bounded(p, timeout, stdin_bytes, max_stdout, max_stderr):
 
 
 def run_bounded(argv, timeout, stdin_bytes=None, capture=True, interactive=False,
-                log=None, max_stdout=DEFAULT_MAX_STDOUT, max_stderr=DEFAULT_MAX_STDERR):
+                log=None, max_stdout=DEFAULT_MAX_STDOUT, max_stderr=DEFAULT_MAX_STDERR,
+                env=None):
     """Run argv in its own process group; kill and reap the GROUP on timeout,
     interruption OR an output-limit breach. Returns (rc, stdout_bytes, stderr_bytes).
 
@@ -467,9 +534,12 @@ def run_bounded(argv, timeout, stdin_bytes=None, capture=True, interactive=False
 
     Output is drained incrementally under ``max_stdout`` / ``max_stderr`` byte
     ceilings; exceeding either terminates and reaps the child group and raises
-    OutputLimitExceeded.
+    OutputLimitExceeded. ``env`` replaces the child's environment when given (used
+    to strip SSH_ASKPASS* so a password can only come from the terminal).
     """
     kwargs = dict(_OWN_GROUP)
+    if env is not None:
+        kwargs["env"] = env
     if capture:
         kwargs.update(
             stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
@@ -505,36 +575,77 @@ def run_bounded(argv, timeout, stdin_bytes=None, capture=True, interactive=False
 
 
 def classify_ssh_failure(stderr_text):
-    """Map ssh stderr to the right exception type."""
+    """Map ssh stderr to the right exception type.
+
+    Only used where authentication or the host-key check can legitimately be the
+    cause: control-master ESTABLISHMENT. A multiplexed command runs over an
+    already-pinned master, so its failures must not be classified from device text
+    (see ``SSHTransport._rsh``).
+
+    The embedded text is bounded and stripped of control bytes by
+    ``sanitize_detail`` before it can reach a terminal or an outcome record.
+    """
     t = (stderr_text or "").lower()
     if "host key verification failed" in t or "remote host identification has changed" in t \
             or "no matching host key" in t or ("host key" in t and "changed" in t):
-        return TransportHostKeyError("pinned host key did not match: %s" % stderr_text.strip())
+        return TransportHostKeyError("pinned host key did not match: %s"
+                                     % sanitize_detail(stderr_text))
     if "permission denied" in t or "authentication failed" in t or "too many authentication" in t:
-        return TransportAuthError("ssh authentication was refused: %s" % stderr_text.strip())
+        return TransportAuthError("ssh authentication was refused: %s"
+                                  % sanitize_detail(stderr_text))
     if any(s in t for s in ("connection refused", "no route to host", "operation timed out",
                             "connection timed out", "network is unreachable",
                             "could not resolve hostname", "connection reset",
                             "connection closed by", "host is down", "no address associated")):
         return TransportUnreachableError(
-            "management address unreachable: %s" % stderr_text.strip())
-    return TransportError("ssh failed: %s" % (stderr_text.strip() or "unknown error"))
+            "management address unreachable: %s" % sanitize_detail(stderr_text))
+    return TransportError("ssh failed: %s" % (sanitize_detail(stderr_text) or "unknown error"))
 
 
-def _oneline(raw):
-    """A bounded single-line rendering of captured bytes, for error messages."""
-    text = (raw or b"").decode("utf-8", "replace")
-    return " ".join(text.split())[:200]
+def classify_transport_failure(stderr_text):
+    """Classify a MULTIPLEXED command's stderr — transport classes ONLY.
+
+    A multiplexed command rides an already-established, already-pinned master, so
+    it can no longer legitimately fail the host-key check or authentication. Mapping
+    its stderr through ``classify_ssh_failure`` would let the DEVICE pick its own
+    outcome class by printing "Host key verification failed" or "Permission denied"
+    on its own stderr. Only the unreachable class is recognised here; everything
+    else is a plain transport error. Authentication and host-key classes belong to
+    master establishment, where they are decided by the ssh client itself.
+    """
+    t = (stderr_text or "").lower()
+    if any(s in t for s in ("connection refused", "no route to host", "operation timed out",
+                            "connection timed out", "network is unreachable",
+                            "could not resolve hostname", "connection reset",
+                            "connection closed by", "host is down", "no address associated",
+                            "broken pipe", "transport endpoint is not connected",
+                            "control socket connect")):
+        return TransportUnreachableError(
+            "management address unreachable: %s" % sanitize_detail(stderr_text))
+    return TransportError("multiplexed ssh command failed: %s"
+                          % (sanitize_detail(stderr_text) or "no diagnostic on stderr"))
 
 
 class SSHSession:
-    """Opaque handle for one provisioned collection session."""
+    """Opaque handle for one provisioned collection session.
+
+    ``ownership`` is a TRI-STATE, because "this run created it" and "we do not
+    know" are different facts and only the first authorises a removal:
+
+      ``none``     the remote directory provably was not created by this run
+                   (mkdir was refused, or the name collided)
+      ``unknown``  the name was chosen and the mkdir was SENT, but no reply ever
+                   confirmed it; a directory MAY exist and must NOT be removed
+                   automatically
+      ``owned``    mkdir was acknowledged, so this run created the directory and
+                   may remove exactly that path
+    """
 
     def __init__(self, remote_dir, artifact_sha):
         self.remote_dir = remote_dir
         self.artifact_sha = artifact_sha
         self.provisioned = False
-        self.owned = False      # True only after WE created remote_dir
+        self.ownership = "none"
 
 
 class SSHTransport:
@@ -581,19 +692,53 @@ class SSHTransport:
         self._ctrl_dir = None
         self._ctrl_path = None
         self._master_up = False
+        self._master_pid = None
 
     # ------------------------------------------------------------- options
     def _ssh_opts(self):
+        """The ssh option set. Deliberately HERMETIC.
+
+        Every relevant setting is stated explicitly so the connection cannot be
+        altered by ambient OpenSSH configuration: ``-F /dev/null`` ignores
+        ``~/.ssh/config`` entirely, the system-wide known-hosts file is disabled,
+        agent and connection forwarding are off, and ProxyCommand /
+        KnownHostsCommand / UpdateHostKeys are pinned to their disabled forms.
+
+        This does NOT change the working pinned connection: the bench host has no
+        ``~/.ssh/config``, and the transport already selects password-only
+        authentication with a pinned ``known_hosts`` and ``StrictHostKeyChecking``.
+        """
         return [
+            "-F", "/dev/null",
             "-o", "UserKnownHostsFile=%s" % self.known_hosts,
+            "-o", "GlobalKnownHostsFile=/dev/null",
             "-o", "StrictHostKeyChecking=yes",
+            "-o", "UpdateHostKeys=no",
+            "-o", "KnownHostsCommand=none",
             "-o", "PreferredAuthentications=password",
             "-o", "PubkeyAuthentication=no",
             "-o", "NumberOfPasswordPrompts=1",
+            "-o", "ForwardAgent=no",
+            "-o", "ClearAllForwardings=yes",
+            "-o", "ProxyCommand=none",
             "-o", "LogLevel=ERROR",
             "-o", "ConnectTimeout=%d" % self.connect_timeout,
             "-o", "ServerAliveInterval=5",
             "-o", "ServerAliveCountMax=3",
+        ]
+
+    def _multiplexed_opts(self):
+        """Options for a command that must ride the EXISTING control master.
+
+        ``BatchMode=yes`` makes a fallback unable to prompt for a password, and
+        ``ControlMaster=no`` keeps it from opening a new master of its own — so a
+        lost master can neither stall on a terminal read nor silently reconnect
+        with interactive authentication.
+        """
+        return [
+            "-o", "BatchMode=yes",
+            "-o", "ControlMaster=no",
+            "-o", "ControlPath=%s" % self._ctrl_path,
         ]
 
     def _target(self):
@@ -624,12 +769,139 @@ class SSHTransport:
     # --------------------------------------------------------------- master
     def _release_master_resources(self):
         self._master_up = False
+        self._master_pid = None
         if self._ctrl_dir and os.path.isdir(self._ctrl_dir):
             shutil.rmtree(self._ctrl_dir, ignore_errors=True)
         self._ctrl_dir = None
         self._ctrl_path = None
 
+    def _master_check(self):
+        """Ask OpenSSH itself whether the control master is alive.
+
+        Returns ``(alive, pid)``. ``-O check`` prints ``Master running (pid=NNNN)``
+        and exits 0 when the master answers, and exits non-zero when the control
+        socket is absent or dead. ``pid`` is the master's PID when ssh reported it,
+        else None. This is the authoritative liveness probe; ``_master_up`` alone is
+        only a record of what happened at establishment time.
+        """
+        if not self._ctrl_path:
+            return False, None
+        argv = [self.ssh_bin] + self._ssh_opts() + [
+            "-o", "BatchMode=yes",
+            "-o", "ControlPath=%s" % self._ctrl_path,
+            "-O", "check", self._target(),
+        ]
+        try:
+            rc, out, err = run_bounded(argv, _MASTER_CHECK_BOUND, env=_child_env(),
+                                       max_stdout=4096, max_stderr=4096)
+        except (RemoteTimeout, OSError):
+            return False, None
+        if rc != 0:
+            return False, None
+        m = re.search(r"pid=(\d{1,10})", out.decode("utf-8", "replace"))
+        return True, (int(m.group(1)) if m else None)
+
+    def _require_master(self):
+        """Refuse a multiplexed command unless the master is PROVEN alive.
+
+        Without this gate an OpenSSH client given only a ControlPath makes a fresh
+        DIRECT connection as soon as the control socket is gone. That connection
+        needs a password, and this call site has no terminal handover, so it would
+        either stall on a `/dev/tty` read (SIGTTIN, surfacing as a bogus timeout) or
+        fail confusingly. The gate converts a lost master into a fast, explicit,
+        classified error instead.
+        """
+        if not self._master_up:
+            raise ControlMasterLost(
+                "ssh control master is not up; refusing to start a multiplexed command "
+                "(a fresh connection would need interactive authentication)")
+        alive, pid = self._master_check()
+        if not alive:
+            self._master_up = False
+            self._master_pid = None
+            raise ControlMasterLost(
+                "ssh control master has gone away (control socket %s no longer answers); "
+                "refusing to fall back to a fresh connection" % self._ctrl_path)
+        if pid and pid > 0:
+            self._master_pid = pid
+
+    def _kill_master_pid(self):
+        """Last resort: signal ONLY the PID OpenSSH itself reported for the master.
+
+        Never a pattern, a prefix or a process-group sweep — one PID, verified to
+        have exited between attempts. Returns a short human description.
+        """
+        pid = self._master_pid
+        if not pid or pid <= 0:
+            return "no master pid was reported by ssh; nothing was killed"
+        if pid == os.getpid():
+            return "refusing to signal our own pid"
+        for sig, wait in ((signal.SIGTERM, 2.0), (signal.SIGKILL, 2.0)):
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                return "master pid %d had already exited" % pid
+            except OSError as e:
+                return "could not signal master pid %d (%s)" % (pid, e)
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return "master pid %d exited after %s" % (
+                        pid, signal.Signals(sig).name)
+                except OSError:
+                    break
+                time.sleep(0.05)
+        return "master pid %d survived SIGKILL" % pid
+
+    def _exit_master(self, verify=True):
+        """Ask the master to exit, then VERIFY it is gone.
+
+        Returns True (confirmed gone), False (it still answers) or None (no master
+        was known to be up and no control socket existed, so there was nothing to
+        stop). Shutdown is never inferred from the ABSENCE of an error: success is
+        the positive result of the follow-up ``-O check``.
+        """
+        if not self._ctrl_path:
+            return None
+        known_up = self._master_up
+        socket_present = os.path.exists(self._ctrl_path)
+        self._master_up = False
+        if not (known_up or socket_present):
+            return None
+        try:
+            rc, _out, err = run_bounded(
+                [self.ssh_bin] + self._ssh_opts() + [
+                    "-o", "BatchMode=yes",
+                    "-o", "ControlPath=%s" % self._ctrl_path,
+                    "-O", "exit", self._target()],
+                15, env=_child_env(), max_stdout=4096, max_stderr=4096)
+            if rc != 0:
+                self.log("ssh -O exit returned %d: %s" % (rc, _oneline(err)))
+        except BaseException as e:                           # noqa: BLE001 - best effort
+            self.log("ssh -O exit did not complete: %s" % sanitize_detail(e))
+        if not verify:
+            return None
+        alive, _pid = self._master_check()
+        if not alive:
+            return True
+        self.log("ssh master still answered after -O exit; killing the reported pid")
+        self.log(self._kill_master_pid())
+        alive, _pid = self._master_check()
+        return not alive
+
     def _start_master(self):
+        try:
+            self._start_master_inner()
+        except BaseException:
+            # even a failure or an interruption must not leave a master or a
+            # control-socket directory behind
+            self._exit_master(verify=False)
+            self._release_master_resources()
+            raise
+
+    def _start_master_inner(self):
         self._ctrl_dir = tempfile.mkdtemp(prefix="rt-ax56u-cm.")
         os.chmod(self._ctrl_dir, 0o700)
         self._ctrl_path = os.path.join(self._ctrl_dir, "cm")
@@ -644,39 +916,81 @@ class SSHTransport:
         # the child's group is lent the terminal's foreground for the duration (so
         # the read is not stopped by SIGTTIN), and the previous foreground group and
         # terminal modes are restored afterwards. Without a controlling terminal no
-        # interactive prompt is possible at all. A failure OR an interruption must
-        # not leave the control-socket directory behind.
+        # interactive prompt is possible at all.
+        #
+        # This is the ONLY call site allowed to hand over the terminal: interactive
+        # authentication belongs to master establishment, never to a multiplexed
+        # command.
         has_tty = has_controlling_terminal()
         interactive = has_tty if self.interactive_auth is None else bool(self.interactive_auth)
         if self.interactive_auth is None and not has_tty:
             self.log("no controlling terminal: interactive password authentication is "
-                     "unavailable (a key in authorized_keys is required for unattended use)")
-        try:
-            rc, _out, err = run_bounded(argv, self.connect_timeout + 20,
-                                        interactive=interactive, log=self.log,
-                                        max_stdout=self.max_stdout_bytes,
-                                        max_stderr=self.max_stderr_bytes)
-        except BaseException:
-            self._release_master_resources()
-            raise
+                     "unavailable. Public-key authentication is DISABLED by this "
+                     "transport (PubkeyAuthentication=no), so an installed key alone "
+                     "would not enable unattended use - that needs its own implementation "
+                     "change, not just a key in authorized_keys.")
+        rc, _out, err = run_bounded(argv, self.connect_timeout + 20,
+                                    interactive=interactive, log=self.log,
+                                    env=_child_env(),
+                                    max_stdout=self.max_stdout_bytes,
+                                    max_stderr=self.max_stderr_bytes)
         if rc != 0:
-            msg = err.decode("utf-8", "replace")
-            self._release_master_resources()
-            raise classify_ssh_failure(msg)
+            if rc == -signal.SIGINT:
+                # Ctrl-C at the password prompt kills ssh itself. The operator
+                # interrupted authentication; that is not a transport failure.
+                raise KeyboardInterrupt
+            raise classify_ssh_failure(err.decode("utf-8", "replace"))
         self._master_up = True
+        alive, pid = self._master_check()
+        if not alive:
+            self._master_up = False
+            raise ControlMasterLost(
+                "ssh reported a successful master start but the control socket does "
+                "not answer - refusing to continue")
+        self._master_pid = pid if (pid and pid > 0) else None
         self.log("ssh master established to %s" % self._target())
 
     def _rsh(self, cmd, timeout, stdin_bytes=None):
-        argv = [self.ssh_bin] + self._ssh_opts()
+        """Run one command over the EXISTING control master."""
+        self._require_master()
+        argv = [self.ssh_bin] + self._ssh_opts() + self._multiplexed_opts()
         if stdin_bytes is None:
             argv += ["-n"]
-        argv += ["-o", "ControlPath=%s" % self._ctrl_path, self._target(), cmd]
+        argv += [self._target(), cmd]
         rc, out, err = run_bounded(argv, timeout, stdin_bytes=stdin_bytes,
+                                   env=_child_env(),
                                    max_stdout=self.max_stdout_bytes,
                                    max_stderr=self.max_stderr_bytes)
         if rc == 255:
-            raise classify_ssh_failure(err.decode("utf-8", "replace"))
+            # A multiplexed command rides an established, pinned master, so it cannot
+            # legitimately fail authentication or the host-key check. Its stderr is
+            # classified into TRANSPORT classes only, never auth/hostkey: routing it
+            # through classify_ssh_failure() would let the DEVICE choose its own
+            # outcome class by printing "Host key verification failed" or
+            # "Permission denied".
+            raise classify_transport_failure(err.decode("utf-8", "replace"))
         return rc, out, err
+
+    def _psh(self, stage, cmd, timeout, stdin_bytes=None):
+        """Run one PROVISIONING command, tagging a PROVISIONING-SPECIFIC failure.
+
+        Only one thing is rewritten here: a LOCAL DEADLINE expiry during
+        provisioning. It previously surfaced as the reporter's own `timeout`
+        ("reporter run exceeded its bound") even though the reporter had not started;
+        it is now a provisioning failure that names the stage.
+
+        Everything else passes through with its own classification on purpose: an
+        unreachable address, an authentication refusal, a host-key mismatch and a
+        control master loss keep their dedicated types (and outcomes), because those
+        are the classes the recovery trial reasons about. The individual
+        provisioning gates raise ``ProvisioningError`` themselves.
+        """
+        try:
+            return self._rsh(cmd, timeout, stdin_bytes=stdin_bytes)
+        except RemoteTimeout as e:
+            raise ProvisioningError(
+                "provisioning step '%s' exceeded its %ss deadline (the reporter never "
+                "ran): %s" % (stage, timeout, sanitize_detail(e))) from e
 
     # ------------------------------------------------------------- session
     def start(self):
@@ -687,12 +1001,26 @@ class SSHTransport:
         try:
             self._provision(session)
         except BaseException as e:
+            session.provisioned = False
+            cleanup_ok = True
+            cleanup_detail = None
             try:
                 self._dispose(session)
+                session.ownership = "none"
             except Exception as ce:                          # noqa: BLE001
-                self.log("cleanup after failed provision did not succeed: %s" % ce)
+                cleanup_ok = False
+                cleanup_detail = sanitize_detail(ce)
+                self.log("cleanup after failed provision did not succeed: %s" % cleanup_detail)
             finally:
                 self.close()
+            # Carry the provisioning-cleanup outcome OUT to the caller. A failed
+            # provision is exactly when a remote directory is most likely to be left
+            # behind, and the attempt record must say so rather than defaulting to
+            # cleanup_ok=true.
+            setattr(e, "remote_dir", session.remote_dir)
+            setattr(e, "remote_ownership", session.ownership)
+            setattr(e, "provision_cleanup_ok", cleanup_ok)
+            setattr(e, "provision_cleanup_detail", cleanup_detail)
             raise e
         return session
 
@@ -701,23 +1029,26 @@ class SSHTransport:
         self.log("router temp dir: %s" % rd)
 
         # 1. OpenSSL SHA-256 known-answer test (the router has no sha256sum/od)
-        rc, out, err = self._rsh(KAT_CMD, self.connect_timeout + 10)
-        kat = out.decode("utf-8", "replace").strip().split()[-1] if out.strip() else ""
+        rc, out, err = self._psh("openssl sha256 known-answer test", KAT_CMD,
+                                 self.connect_timeout + 10)
+        kat = _last_token(out)
         if rc != 0 or kat != OPENSSL_KAT_ABC:
-            raise TransportError("openssl SHA-256 known-answer test FAILED (got %r)" % kat)
+            raise ProvisioningError(
+                "openssl SHA-256 known-answer test FAILED (rc=%d, got %s)"
+                % (rc, sanitize_detail(kat) or "<empty>"))
 
         # 2. required-tool hard gate: require rc==0 AND exactly one well-formed
         #    marker line. A nonzero exit, a missing marker, several markers or an
         #    unrecognised marker all stop provisioning BEFORE any remote state is
         #    created or anything is executed.
-        rc, out, err = self._rsh(TOOLS_CMD, self.connect_timeout + 10)
+        rc, out, err = self._psh("required-tool probe", TOOLS_CMD, self.connect_timeout + 10)
         if rc != 0:
-            raise TransportError(
+            raise ProvisioningError(
                 "required-tool probe failed (rc=%d): %s - hard stop" % (rc, _oneline(err)))
         markers = [ln.strip() for ln in out.decode("utf-8", "replace").splitlines()
                    if ln.strip()]
         if len(markers) != 1:
-            raise TransportError(
+            raise ProvisioningError(
                 "required-tool probe returned %d marker line(s), expected exactly 1 "
                 "- ambiguous, hard stop" % len(markers))
         marker = markers[0]
@@ -726,19 +1057,29 @@ class SSHTransport:
         elif marker.startswith("TOOLS_MISSING:"):
             miss = marker[len("TOOLS_MISSING:"):].strip()
             if not miss:
-                raise TransportError(
+                raise ProvisioningError(
                     "required-tool probe reported an empty MISSING list - malformed, hard stop")
-            raise TransportError("required router tools MISSING: %s - hard stop" % miss)
+            raise ProvisioningError("required router tools MISSING: %s - hard stop"
+                                    % sanitize_detail(miss))
         else:
-            raise TransportError(
-                "required-tool probe returned an unrecognised result %r - hard stop" % marker)
+            raise ProvisioningError(
+                "required-tool probe returned an unrecognised result %s - hard stop"
+                % sanitize_detail(marker))
 
-        # 3. exclusive private directory (ownership tracking)
-        rc, _out, _err = self._rsh('mkdir -m 700 "%s" && [ -d "%s" ]' % (rd, rd),
-                                   self.connect_timeout + 10)
+        # 3. exclusive private directory (ownership tracking).
+        #    From HERE a directory may exist: the mkdir is about to be sent and its
+        #    reply can be lost. Ownership therefore becomes "unknown" FIRST and is
+        #    upgraded to "owned" only when the reply acknowledges creation, or set
+        #    back to "none" when the reply says the directory was not created.
+        session.ownership = "unknown"
+        rc, _out, _err = self._psh(
+            "exclusive mkdir", 'mkdir -m 700 "%s" && [ -d "%s" ]' % (rd, rd),
+            self.connect_timeout + 10)
         if rc != 0:
-            raise TransportError("exclusive mkdir failed at %s - this run created nothing" % rd)
-        session.owned = True
+            session.ownership = "none"
+            raise ProvisioningError(
+                "exclusive mkdir failed at %s - this run created nothing" % rd)
+        session.ownership = "owned"
 
         # 4. PROVE the remote watchdog bounds a long job before it is trusted
         if self.watchdog_selftest_enabled:
@@ -749,23 +1090,34 @@ class SSHTransport:
             blob = fh.read()
         xfer = ('cat > "%s/router_health" && chmod 700 "%s/router_health" && '
                 '/usr/sbin/openssl dgst -sha256 "%s/router_health"' % (rd, rd, rd))
-        rc, out, err = self._rsh(xfer, self.connect_timeout + 30, stdin_bytes=blob)
-        rsha = out.decode("utf-8", "replace").strip().split()[-1] if out.strip() else ""
+        rc, out, err = self._psh("artifact transfer + router-side SHA-256", xfer,
+                                 self.connect_timeout + 30, stdin_bytes=blob)
+        rsha = _last_token(out)
         if rc != 0:
-            raise RemoteCommandError(rc, "transfer command failed (rc=%d)" % rc)
+            raise ProvisioningError("transfer command failed (rc=%d): %s"
+                                    % (rc, _oneline(err)))
         if self.artifact_sha and rsha != self.artifact_sha:
-            raise ArtifactMismatch("router-side SHA-256 mismatch (%s) - refusing to execute" % rsha)
+            # A hash gate failure keeps its own type (a hard stop, not a retry).
+            raise ArtifactMismatch("router-side SHA-256 mismatch (%s) - refusing to execute"
+                                   % (sanitize_detail(rsha) or "<empty>"))
 
-        # 6. control: prove /tmp can execute at all
+        # 6. control: prove /tmp can execute at all. rc==0 alone is not accepted:
+        #    the control command must also print its marker.
         ctl = ('cp /bin/busybox "%s/busybox" && chmod 700 "%s/busybox" && '
                '"%s/busybox" echo control-exec-ok; ec=$?; rm -f "%s/busybox"; exit $ec'
                % (rd, rd, rd, rd))
-        rc, out, err = self._rsh(ctl, self.connect_timeout + 10)
+        rc, out, err = self._psh("control exec from /tmp", ctl, self.connect_timeout + 10)
         if rc != 0:
-            raise RemoteCommandError(rc, "control exec from /tmp failed (rc=%d)" % rc)
+            raise ProvisioningError("control exec from /tmp failed (rc=%d): %s"
+                                    % (rc, _oneline(err)))
+        if b"control-exec-ok" not in (out or b""):
+            raise ProvisioningError(
+                "control exec reported rc=0 without the control-exec-ok marker - "
+                "executing from /tmp is not proven - hard stop")
 
         session.provisioned = True
-        self.log("artifact verified on the router (sha256 %s)" % (rsha[:16] + "..." if rsha else "?"))
+        self.log("artifact verified on the router (sha256 %s)"
+                 % ((rsha[:16] + "...") if rsha else "?"))
 
     def _watchdog_selftest(self, session):
         """Run a long job under the SAME watchdog shape used for the reporter and
@@ -781,37 +1133,45 @@ class SSHTransport:
         bound = self.watchdog_selftest_bound
         cmd = selftest_cmd(session.remote_dir, bound)
         started = time.monotonic()
-        rc, out, err = self._rsh(cmd, bound + self.connect_timeout + 10)
+        rc, out, err = self._psh("watchdog self-test", cmd,
+                                 bound + self.connect_timeout + 10)
         elapsed = time.monotonic() - started
         if rc != 0:
-            raise TransportError(
+            raise ProvisioningError(
                 "watchdog self-test did not complete (rc=%d): %s" % (rc, _oneline(err)))
         text = out.decode("utf-8", "replace")
-        exits = re.findall(r"selftest_exit=(\d+)", text)
-        fired = re.findall(r"selftest_wd_fired=([01])", text)
+        # The exit status is matched as a COMPLETE 1..3-digit ASCII number. An
+        # unbounded \d+ would let a device reply such as `selftest_exit=` followed by
+        # thousands of digits reach int() and raise ValueError (Python's int/str
+        # conversion limit), losing the attempt; and a bare \d{1,3} would silently
+        # accept the first three digits of a longer run. The negative lookahead
+        # rejects a prefix of a longer digit run, so such a reply is reported as
+        # "missing or ambiguous", which is the honest classification.
+        exits = re.findall(r"selftest_exit=(\d{1,3})(?!\d)", text, re.ASCII)
+        fired = re.findall(r"selftest_wd_fired=([01])(?!\d)", text, re.ASCII)
         if len(exits) != 1 or len(fired) != 1:
-            raise TransportError(
+            raise ProvisioningError(
                 "watchdog self-test result is missing or ambiguous "
                 "(exit markers=%d, fired markers=%d)" % (len(exits), len(fired)))
         st = int(exits[0])
         fired_flag = int(fired[0])
         if st == 0:
-            raise TransportError(
+            raise ProvisioningError(
                 "watchdog self-test FAILED: the long job completed instead of being "
                 "killed at %ss - the remote bound is NOT proven - refusing to run" % bound)
         if st != _WD_SIGKILL_STATUS:
-            raise TransportError(
+            raise ProvisioningError(
                 "watchdog self-test FAILED: unexpected termination status %d "
                 "(expected %d from the watchdog's SIGKILL) - refusing to run"
                 % (st, _WD_SIGKILL_STATUS))
         if fired_flag != 1:
-            raise TransportError(
+            raise ProvisioningError(
                 "watchdog self-test FAILED: no evidence the watchdog timer fired "
                 "(the job died from something other than the bound) - refusing to run")
         lower = max(0.0, bound - _SELFTEST_LOWER_TOL)
         upper = bound + _SELFTEST_UPPER_TOL
         if not (lower <= elapsed <= upper):
-            raise TransportError(
+            raise ProvisioningError(
                 "watchdog self-test FAILED: the job ended after %.2fs, outside the "
                 "expected %ss bound (tolerance %.1f-%.1fs) - refusing to run"
                 % (elapsed, bound, lower, upper))
@@ -823,31 +1183,59 @@ class SSHTransport:
         cmd = run_cmd(session.remote_dir, self.run_bound)
         bound = timeout if timeout is not None else self.run_bound + self.remote_grace
         rc, out, err = self._rsh(cmd, bound)
-        if rc in (129, 130, 137, 143):
-            raise RemoteTimeout("reporter run was killed by the watchdog (rc=%d)" % rc)
+        if rc == _WD_SIGKILL_STATUS:
+            raise RemoteTimeout("reporter run was killed by the watchdog "
+                                "(rc=%d, SIGKILL)" % rc)
+        if rc in _SIGNAL_STATUSES:
+            # 129 is this script's own trap exit for HUP/INT/TERM; 130 and 143 are
+            # SIGINT and SIGTERM. None of them is the watchdog's SIGKILL, and there
+            # is no timer-fired evidence, so this is reported as a command failure
+            # rather than claimed to be the bound.
+            raise RemoteCommandError(rc, (
+                "reporter run was ended by signal %d (rc=%d); this is NOT proven to be "
+                "the watchdog timer (the watchdog's status is %d): %s"
+                % (rc - 128, rc, _WD_SIGKILL_STATUS, _oneline(err))))
         if rc != 0:
-            diag = err.decode("utf-8", "replace").strip().replace("\n", " ")
-            raise RemoteCommandError(rc, "reporter exited %d: %s" % (rc, diag[:400]))
+            raise RemoteCommandError(rc, "reporter exited %d: %s" % (rc, _oneline(err)))
         return out
 
     # ------------------------------------------------------------- cleanup
     def _dispose(self, session):
         """Remove the remote dir THIS run created. Raises CleanupError on failure.
 
-        A directory this run did NOT create is never touched (returns quietly).
+        Ownership is respected exactly:
+          * ``none``    nothing was created - nothing to do;
+          * ``unknown`` the mkdir was sent but never acknowledged, so a directory MAY
+                        exist and is deliberately NOT removed automatically (removing
+                        it would be acting on a guess); the caller records the
+                        uncertainty instead;
+          * ``owned``   the mkdir was acknowledged - remove exactly that path, and
+                        require the removal's own positive marker.
         """
-        if not session.owned:
+        if session.ownership == "none":
             return
+        if session.ownership != "owned":
+            raise CleanupError(
+                "remote dir %s may exist but its creation was never acknowledged "
+                "(ownership=unknown); NOT removing it automatically - it needs read-only "
+                "manual reconciliation" % session.remote_dir)
         if not self._master_up:
             raise CleanupError(
                 "ssh master is down; remote dir %s may remain on the router" % session.remote_dir)
         cmd = CLEAN_CMD.format(rd=session.remote_dir)
         try:
-            rc, _out, err = self._rsh(cmd, self.connect_timeout + 10)
+            rc, out, err = self._rsh(cmd, self.connect_timeout + 10)
         except TransportError as e:
-            raise CleanupError("failed to remove router dir %s: %s" % (session.remote_dir, e))
+            raise CleanupError("failed to remove router dir %s: %s"
+                               % (session.remote_dir, sanitize_detail(e)))
         if rc != 0:
             raise CleanupError("failed to remove router dir %s (rc=%d)" % (session.remote_dir, rc))
+        if b"REMOVED" not in (out or b""):
+            # Never infer success from the absence of an error: require the command's
+            # own positive marker.
+            raise CleanupError(
+                "removal of router dir %s reported rc=0 without the REMOVED marker - "
+                "the directory's absence is NOT confirmed" % session.remote_dir)
 
     def stop(self, session):
         """Tear the session down. A cleanup failure is raised AFTER the master is
@@ -863,18 +1251,13 @@ class SSHTransport:
             raise err
 
     def close(self):
+        """Stop the control master (verified) and release the local socket dir."""
         try:
-            if self._master_up and self._ctrl_path:
-                try:
-                    run_bounded([self.ssh_bin, "-o", "ControlPath=%s" % self._ctrl_path,
-                                 "-O", "exit", self._target()], 15)
-                except BaseException:                       # noqa: BLE001 - best effort
-                    pass
-                self._master_up = False
+            result = self._exit_master()
+            if result is False:
+                self.log("WARNING: the ssh control master still answered after -O exit; "
+                         "shutdown is NOT confirmed")
+            elif result is True:
+                self.log("ssh control master exited (shutdown verified)")
         finally:
-            # always release the local control-socket directory, even if the
-            # master shutdown was interrupted
-            if self._ctrl_dir and os.path.isdir(self._ctrl_dir):
-                shutil.rmtree(self._ctrl_dir, ignore_errors=True)
-            self._ctrl_dir = None
-            self._ctrl_path = None
+            self._release_master_resources()

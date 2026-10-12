@@ -5,6 +5,21 @@ It emits documents shaped exactly like the real reporter (the base document is
 the live RT-AX56U sample captured on 2026-10-12), and raises the same exception
 types the real transport raises, so the collector's outcome classification and
 CPU/incident logic are exercised identically.
+
+Scenarios added for the review remediation:
+
+  provision_failure   the session cannot be provisioned; the raised exception
+                      carries the same remote_dir / ownership / cleanup facts the
+                      real transport attaches
+  master_lost         the multiplexed control master disappeared
+  control_byte        the device answers its own known-answer text with a single
+                      0x1C byte (the IndexError reproducer)
+  null_sections       /proc/cpuinfo and /proc/loadavg were unreadable, so the
+                      reporter emits "cpu":null and "loadavg":null
+  boot_change         a reboot whose LATER sample shows a HIGHER uptime, so only the
+                      explicit boot identity can detect it
+  reboot_legacy       the same reboot expressed by falling uptime and no boot_time
+                      (the documented heuristic fallback)
 """
 
 import copy
@@ -13,6 +28,8 @@ import os
 import time
 
 from .errors import (
+    ControlMasterLost,
+    ProvisioningError,
     RemoteCommandError,
     RemoteTimeout,
     TransportAuthError,
@@ -29,7 +46,15 @@ SCENARIOS = (
     "success", "malformed", "wrong_schema", "wrong_type", "timeout",
     "auth", "unreachable", "hostkey", "reporter_failure",
     "reset", "reboot", "zero_elapsed", "nested", "huge_number",
+    "provision_failure", "master_lost", "control_byte", "null_sections",
+    "boot_change", "reboot_legacy",
 )
+
+# The boot identity the mock reports. Fixed so "success" and the other
+# same-boot scenarios agree, and changed only by the reboot scenarios.
+_BOOT_TIME = 1_700_000_000.0
+# Sentinel: "use the mock's fixed boot identity" (as opposed to None = omit it).
+_KEEP_BOOT = object()
 
 
 def base_doc():
@@ -38,10 +63,11 @@ def base_doc():
 
 
 class MockSession:
-    def __init__(self):
-        self.remote_dir = "/tmp/rt.mock"
+    def __init__(self, remote_dir="/tmp/rt.mock", ownership="none"):
+        self.remote_dir = remote_dir
         self.artifact_sha = "mock"
         self.provisioned = True
+        self.ownership = ownership
 
 
 class ScenarioTransport:
@@ -65,13 +91,29 @@ class ScenarioTransport:
 
     # ---- session lifecycle ------------------------------------------------
     def start(self):
-        if self.scenario == "auth":
+        s = self.scenario
+        if s == "auth":
             raise TransportAuthError("ssh authentication was refused (mock)")
-        if self.scenario == "unreachable":
+        if s == "unreachable":
             raise TransportUnreachableError(
                 "management address unreachable (mock): connection refused")
-        if self.scenario == "hostkey":
+        if s == "hostkey":
             raise TransportHostKeyError("pinned host key did not match (mock)")
+        if s == "provision_failure":
+            e = ProvisioningError(
+                "provisioning step 'exclusive mkdir' failed: remote command exceeded "
+                "its bound (mock)")
+            setattr(e, "remote_dir", "/tmp/rt.mockprov")
+            setattr(e, "remote_ownership", "unknown")
+            setattr(e, "provision_cleanup_ok", False)
+            setattr(e, "provision_cleanup_detail", (
+                "remote dir /tmp/rt.mockprov may exist but its creation was never "
+                "acknowledged (ownership=unknown) (mock)"))
+            raise e
+        if s == "master_lost":
+            raise ControlMasterLost(
+                "ssh control master has gone away (mock); refusing to fall back to a "
+                "fresh connection")
         self.started = True
         return MockSession()
 
@@ -85,6 +127,10 @@ class ScenarioTransport:
             raise RemoteCommandError(1, "reporter exited 1: mock failure")
         if s == "malformed":
             return b'{"schema":"router_health/2", oops not json'
+        if s == "control_byte":
+            # the exact IndexError reproducer: a single control byte, which the
+            # WHITESPACE-based split of the decoded text renders as no token at all
+            return b"\x1c"
         if s == "nested":
             # a small but deeply nested document: must be classified, not crash the
             # interpreter with RecursionError
@@ -103,6 +149,12 @@ class ScenarioTransport:
             d = copy.deepcopy(self._base)
             d["memory_kb"]["MemTotal"] = "lots"
             return json.dumps(d).encode()
+        if s == "null_sections":
+            d = copy.deepcopy(self._base)
+            d["cpu"] = None
+            d["loadavg"] = None
+            d["host"]["boot_time"] = _BOOT_TIME
+            return json.dumps(d).encode()
         if s == "reset":
             # second call: counters DROP toward zero (a real counter reset; /proc
             # counters are unsigned, so they can never go negative) with no uptime
@@ -110,11 +162,25 @@ class ScenarioTransport:
             return json.dumps(self._variant(step=100, uptime=1000.0 + i * self.interval,
                                             reset=(i >= 1))).encode()
         if s == "reboot":
-            # uptime drops between samples
+            # a reboot expressed by the EXPLICIT boot identity; the counters keep
+            # advancing, so only boot_time reveals it
+            boot = _BOOT_TIME if i == 0 else _BOOT_TIME + 3600.0
+            return json.dumps(self._variant(step=100, uptime=1000.0 + i * self.interval,
+                                            boot_time=boot)).encode()
+        if s == "reboot_legacy":
+            # the same reboot without any boot identity: uptime drops
             uptime = 1000.0 + i * self.interval
             if i >= 1:
                 uptime = 5.0
-            return json.dumps(self._variant(step=100, uptime=uptime)).encode()
+            return json.dumps(self._variant(step=100, uptime=uptime, boot_time=None)).encode()
+        if s == "boot_change":
+            # a reboot where the SECOND sample shows a HIGHER uptime and larger
+            # counters throughout - the case a falling-uptime heuristic cannot see
+            if i == 0:
+                return json.dumps(self._variant(step=100, uptime=100.0,
+                                                boot_time=_BOOT_TIME)).encode()
+            return json.dumps(self._variant(step=1000, uptime=500.0,
+                                            boot_time=_BOOT_TIME + 7200.0)).encode()
         if s == "zero_elapsed":
             # identical counters on both samples -> zero elapsed counter time
             return json.dumps(self._variant(step=100,
@@ -127,9 +193,15 @@ class ScenarioTransport:
         self.stopped = True
 
     # ---- document synthesis ----------------------------------------------
-    def _variant(self, *, step, uptime, freeze=False, reset=False):
+    def _variant(self, *, step, uptime, freeze=False, reset=False, boot_time=_KEEP_BOOT):
         d = copy.deepcopy(self._base)
         d["host"]["uptime_seconds"] = float(format(uptime, ".1f"))
+        if boot_time is _KEEP_BOOT:
+            d["host"]["boot_time"] = _BOOT_TIME
+        elif boot_time is None:
+            d["host"].pop("boot_time", None)
+        else:
+            d["host"]["boot_time"] = float(boot_time)
         n = d["cpu"]["count"]
         agg = {"user": 0, "nice": 0, "system": 0, "idle": 0,
                "iowait": 0, "irq": 0, "softirq": 0, "steal": 0}

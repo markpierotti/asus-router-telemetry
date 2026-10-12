@@ -39,6 +39,7 @@ argument to a C double and raises ``OverflowError`` on an int such as ``10**400`
 
 import json
 import math
+import reprlib
 
 from .errors import MalformedData, SchemaInvalid
 
@@ -47,6 +48,26 @@ SCHEMA = "router_health/2"
 # Containment budgets. parse() also takes explicit per-call overrides.
 MAX_DOC_BYTES = 1024 * 1024     # 1 MiB: far above any legitimate reporter document
 MAX_NESTING = 64                # the real document nests about five levels deep
+
+# Every value or attacker-controlled KEY NAME that reaches a diagnostic is
+# rendered through this bound. A device can put a megabyte-long string in a field
+# or a key, and that text ends up in an outcome `detail`; an unbounded render
+# would let one bad document evict earlier evidence from the outcome log.
+MAX_RENDER = 120
+_repr = reprlib.Repr()
+_repr.maxstring = 60
+_repr.maxother = 60
+
+
+def _short(value):
+    """A bounded repr of an untrusted value (or key name), for a diagnostic."""
+    try:
+        text = _repr.repr(value)
+    except Exception:                          # noqa: BLE001 - never fail rendering
+        text = "<unrenderable %s>" % type(value).__name__
+    if len(text) > MAX_RENDER:
+        text = text[:MAX_RENDER] + "..."
+    return text
 
 # Numeric limits, derived from what the reporter can actually emit
 # (src/router_health.c):
@@ -105,6 +126,12 @@ def _is_load(x):
     return _is_finite_num(x) and 0.0 <= x < MAX_LOAD
 
 
+def _is_boot_time(x):
+    # An epoch-seconds value read from /proc/stat's `btime`. Same numeric domain
+    # as uptime: a finite non-negative number below 1e12.
+    return _is_finite_num(x) and 0.0 <= x < MAX_UPTIME_SECONDS
+
+
 def _is_nonneg_int(x):
     return _is_int(x) and 0 <= x <= INT_LIMIT
 
@@ -118,13 +145,13 @@ def _req(doc, key, path, kind, kinds):
         _fail("%s.%s" % (path, key), "missing required field")
     v = doc[key]
     if not isinstance(v, kind):
-        _fail("%s.%s" % (path, key), "expected %s, got %r" % (kinds, type(v).__name__))
+        _fail("%s.%s" % (path, key), "expected %s, got %s" % (kinds, _short(v)))
     return v
 
 
 def _opt_nullable(doc, key, path, pred, what):
     if key in doc and doc[key] is not None and not pred(doc[key]):
-        _fail("%s.%s" % (path, key), "expected %s or null, got %r" % (what, doc[key]))
+        _fail("%s.%s" % (path, key), "expected %s or null, got %s" % (what, _short(doc[key])))
     return doc.get(key)
 
 
@@ -145,8 +172,23 @@ def _reject_float(text):
     """
     value = float(text)
     if not math.isfinite(value):
-        raise ValueError("non-finite JSON number %r is not allowed" % text)
+        raise ValueError("non-finite JSON number %s is not allowed" % _short(text))
     return value
+
+
+def _no_duplicate_keys(pairs):
+    """json.loads object_pairs_hook: refuse a document with a repeated key.
+
+    A duplicate key is ambiguous (two values for one field, and the LAST one
+    silently wins in the default decoder) and no well-formed reporter emits one,
+    so it is treated as malformed input rather than guessed at.
+    """
+    seen = {}
+    for k, v in pairs:
+        if k in seen:
+            raise ValueError("duplicate JSON key %s is not allowed" % _short(k))
+        seen[k] = v
+    return seen
 
 
 def _check_nesting(text, max_depth):
@@ -197,7 +239,8 @@ def parse(raw, *, max_bytes=MAX_DOC_BYTES, max_nesting=MAX_NESTING):
                 "response is %d characters, over the %d-byte limit" % (len(text), max_bytes))
     _check_nesting(text, max_nesting)
     try:
-        doc = json.loads(text, parse_constant=_reject_constant, parse_float=_reject_float)
+        doc = json.loads(text, parse_constant=_reject_constant, parse_float=_reject_float,
+                         object_pairs_hook=_no_duplicate_keys)
     except RecursionError as e:
         raise MalformedData("JSON is nested too deeply to decode: %s" % e)
     except ValueError as e:
@@ -210,7 +253,7 @@ def parse(raw, *, max_bytes=MAX_DOC_BYTES, max_nesting=MAX_NESTING):
 def validate(doc):
     """Validate a parsed reporter document. Raises SchemaInvalid; returns doc."""
     if doc.get("schema") != SCHEMA:
-        _fail("schema", "expected %r, got %r" % (SCHEMA, doc.get("schema")))
+        _fail("schema", "expected %r, got %s" % (SCHEMA, _short(doc.get("schema"))))
 
     _req(doc, "tool", "", str, "string")
     _req(doc, "version", "", str, "string")
@@ -221,26 +264,43 @@ def validate(doc):
     _req(host, "release", "host", str, "string")
     _req(host, "machine", "host", str, "string")
     _opt_nullable(host, "uptime_seconds", "host", _is_uptime, "finite uptime in [0, 1e12) seconds")
+    # boot_time is the EXPLICIT boot identity (/proc/stat `btime`, epoch seconds),
+    # optional so a reporter built before it existed remains valid.
+    _opt_nullable(host, "boot_time", "host", _is_boot_time, "finite boot epoch in [0, 1e12) seconds")
 
-    cpu = _req(doc, "cpu", "", dict, "object")
-    if "count" not in cpu:
-        _fail("cpu.count", "missing required field")
-    if not _is_nonneg_int(cpu["count"]):
-        _fail("cpu.count", "expected a non-negative integer, got %r" % (cpu["count"],))
+    # `cpu` and `loadavg` are allowed to be null: the reporter emits null when the
+    # corresponding /proc file is unreadable, and one unreadable file must not
+    # discard the whole sample. `count` / the load fields are checked only when the
+    # section is actually present as an object.
+    if "cpu" not in doc:
+        _fail("cpu", "missing required field")
+    cpu = doc["cpu"]
+    if cpu is not None:
+        if not isinstance(cpu, dict):
+            _fail("cpu", "expected object or null, got %s" % (_short(cpu),))
+        if "count" not in cpu:
+            _fail("cpu.count", "missing required field")
+        if not _is_nonneg_int(cpu["count"]):
+            _fail("cpu.count", "expected a non-negative integer, got %s" % (_short(cpu["count"]),))
 
-    la = _req(doc, "loadavg", "", dict, "object")
-    for k in ("load1", "load5", "load15"):
-        if k not in la:
-            _fail("loadavg.%s" % k, "missing required field")
-        if not _is_load(la[k]):
-            _fail("loadavg.%s" % k,
-                  "expected a finite load in [0, 1e9), got %r" % (la[k],))
-    for k in ("procs_running", "procs_total"):
-        if k not in la:
-            _fail("loadavg.%s" % k, "missing required field")
-        if not _is_nonneg_int(la[k]):
-            _fail("loadavg.%s" % k,
-                  "expected a non-negative integer, got %r" % (la[k],))
+    if "loadavg" not in doc:
+        _fail("loadavg", "missing required field")
+    la = doc["loadavg"]
+    if la is not None:
+        if not isinstance(la, dict):
+            _fail("loadavg", "expected object or null, got %s" % (_short(la),))
+        for k in ("load1", "load5", "load15"):
+            if k not in la:
+                _fail("loadavg.%s" % k, "missing required field")
+            if not _is_load(la[k]):
+                _fail("loadavg.%s" % k,
+                      "expected a finite load in [0, 1e9), got %s" % (_short(la[k]),))
+        for k in ("procs_running", "procs_total"):
+            if k not in la:
+                _fail("loadavg.%s" % k, "missing required field")
+            if not _is_nonneg_int(la[k]):
+                _fail("loadavg.%s" % k,
+                      "expected a non-negative integer, got %s" % (_short(la[k]),))
 
     mem = _req(doc, "memory_kb", "", dict, "object")
     for k in MEM_KEYS:
@@ -248,7 +308,7 @@ def validate(doc):
             _fail("memory_kb.%s" % k, "missing required field")
         if mem[k] is not None and not _is_nonneg_int(mem[k]):
             _fail("memory_kb.%s" % k,
-                  "expected a non-negative integer kB or null, got %r" % (mem[k],))
+                  "expected a non-negative integer kB or null, got %s" % (_short(mem[k]),))
 
     st = doc.get("cpu_stat")
     if st is not None:
@@ -262,14 +322,16 @@ def validate(doc):
             _fail("cpu_stat", "missing aggregate 'cpu' entry")
         for name in names:
             vals = st[name]
+            # The key name is device-controlled: render it bounded.
             if not isinstance(vals, dict):
-                _fail("cpu_stat.%s" % name, "expected object")
+                _fail("cpu_stat.%s" % _short(name), "expected object")
             for f in CPU_FIELDS:
                 if f not in vals:
-                    _fail("cpu_stat.%s.%s" % (name, f), "missing required counter")
+                    _fail("cpu_stat.%s.%s" % (_short(name), f), "missing required counter")
                 if not _is_nonneg_int(vals[f]):
-                    _fail("cpu_stat.%s.%s" % (name, f),
-                          "expected a non-negative integer of jiffies, got %r" % (vals[f],))
+                    _fail("cpu_stat.%s.%s" % (_short(name), f),
+                          "expected a non-negative integer of jiffies, got %s"
+                          % (_short(vals[f]),))
 
     fss = _req(doc, "filesystems", "", list, "array")
     for i, f in enumerate(fss):
@@ -282,7 +344,7 @@ def validate(doc):
             _opt_nullable(f, k, p, _is_nonneg_int, "non-negative integer bytes")
         _opt_nullable(f, "used_percent", p, _is_nonneg_int, "non-negative integer")
         if f.get("used_percent") is not None and f["used_percent"] > 100:
-            _fail("%s.used_percent" % p, "must be within 0..100, got %r" % (f["used_percent"],))
+            _fail("%s.used_percent" % p, "must be within 0..100, got %s" % (_short(f["used_percent"]),))
         _opt_nullable(f, "inodes", p, _is_nonneg_int, "non-negative integer")
         _opt_nullable(f, "inodes_free", p, _is_nonneg_int, "non-negative integer")
 
@@ -300,7 +362,7 @@ def validate(doc):
             _fail("storage.%s" % k, "missing required field")
         if not _is_nonneg_int(storage[k]):
             _fail("storage.%s" % k,
-                  "expected a non-negative integer, got %r" % (storage[k],))
+                  "expected a non-negative integer, got %s" % (_short(storage[k]),))
 
     return doc
 

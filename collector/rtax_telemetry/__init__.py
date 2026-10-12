@@ -6,7 +6,8 @@ calls are made at any point.
 
 Layout
 ------
-errors      exception taxonomy used to *classify* collection outcomes
+errors      exception taxonomy used to *classify* collection outcomes, plus the
+            single sanitiser (`sanitize_detail`) for untrusted device text
 schema      validation of the reporter's JSON (schema + required field types)
 cpu         CPU utilisation derived from successive raw /proc/stat counters
 transport   bounded SSH transport (real), adapted from the reviewed launchers
@@ -17,6 +18,6 @@ status      the human-readable status command
 cli         argument parsing / process entry points
 """
 
-COLLECTOR_VERSION = "1.4.0"
+COLLECTOR_VERSION = "1.5.0"
 SAMPLE_SCHEMA = "rtax_telemetry.sample/1"
 STATE_SCHEMA = "rtax_telemetry.state/1"

@@ -29,11 +29,19 @@ For consecutive samples with counters prev, cur:
 Degenerate cases are reported EXPLICITLY, never silently as 0:
 
     "first"        no previous sample                 -> util null
-    "reboot"       host uptime went backwards         -> util null
+    "reboot"       host rebooted (see detect_reboot)  -> util null
     "reset"        a counter went backwards           -> util null
     "zero_elapsed" delta_total <= 0                    -> util null
     "unavailable"  cpu_stat missing / no comparable key
     "ok"           a real percentage in [0, 100]
+
+A counter "reset" is judged per field EXCEPT the idle group (`idle` + `iowait`),
+which is judged as a sum: a tickless SMP kernel can reclassify time between those
+two without losing it, so `idle` dropping on its own is not a reset. A genuine
+reset moves the other fields too.
+
+Reboot detection prefers the EXPLICIT boot identity (`host.boot_time`, from
+/proc/stat's `btime`) over a wall-clock heuristic; see `detect_reboot`.
 
 `interval_seconds` is the LOCAL MONOTONIC delta between the two samples; it is
 recorded for provenance and is never used to derive the percentage (the counters
@@ -49,6 +57,18 @@ is still compared honestly and no counter is fabricated.
 CPU_FIELDS = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal")
 IDLE_FIELDS = ("idle", "iowait")
 
+# Per-field reset detection EXCLUDES the idle group, which is judged as a SUM.
+# A tickless SMP kernel can move time between `idle` and `iowait` between two
+# readings (the same CPU time, reclassified), so `idle` alone dropping is not a
+# counter reset. A genuine reset drops `user`/`system`/... as well, which keeps the
+# per-field test effective. (Source-derived HARDENING of an unreproduced hypothesis:
+# recorded iowait was 0 on the bench unit, so this is latent there.)
+_RESET_FIELDS = tuple(f for f in CPU_FIELDS if f not in IDLE_FIELDS)
+
+# How far the wall-clock estimate of the boot instant may drift between two samples
+# before it is treated as a reboot, when no explicit boot identity is available.
+_BOOT_SHIFT_TOL = 30.0
+
 
 def total_jiffies(cpu):
     return sum(int(cpu.get(f, 0)) for f in CPU_FIELDS)
@@ -58,10 +78,17 @@ def idle_jiffies(cpu):
     return sum(int(cpu.get(f, 0)) for f in IDLE_FIELDS)
 
 
+def _is_reset(prev, cur):
+    """True when a counter went backwards (a reset), judged per the note above."""
+    if any(int(cur.get(f, 0)) < int(prev.get(f, 0)) for f in _RESET_FIELDS):
+        return True
+    return idle_jiffies(cur) < idle_jiffies(prev)
+
+
 def _pair(prev, cur):
     if prev is None or cur is None:
         return {"state": "unavailable", "util_percent": None}
-    if any(int(cur.get(f, 0)) < int(prev.get(f, 0)) for f in CPU_FIELDS):
+    if _is_reset(prev, cur):
         return {"state": "reset", "util_percent": None,
                 "delta_total": None, "delta_idle": None, "delta_iowait": None}
     dt = total_jiffies(cur) - total_jiffies(prev)
@@ -80,24 +107,59 @@ def _pair(prev, cur):
             "delta_total": dt, "delta_idle": di, "delta_iowait": diow}
 
 
-def detect_reboot(prev_doc, cur_doc):
-    """True when the host uptime moved backwards between two samples.
+def _boot_time(doc):
+    """The explicit boot identity from a reporter document, if it has one."""
+    v = (doc or {}).get("host", {}).get("boot_time")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return v
 
-    The comparison is written so it stays safe for arbitrary-size integers: a
-    subtraction involving a float operand (``pu - 1.0`` or ``pu - cu`` when ``cu``
-    is a float) would coerce ``pu`` to a C double and raise OverflowError for a
-    huge int. Integer-vs-float COMPARISON never coerces, so the float case is
-    phrased as ``cu + 1.0 < pu`` and the integer case keeps an integer subtraction.
+
+def detect_reboot(prev_doc, cur_doc, *, prev_at=None, cur_at=None):
+    """True when the host rebooted between two samples.
+
+    PREFERRED test — the EXPLICIT boot identity. The reporter reads ``btime`` from
+    /proc/stat and emits it as ``host.boot_time`` (epoch seconds). Two samples taken
+    in the same boot carry the same value whatever the clocks did, and two samples
+    from different boots carry different values, so this needs no heuristic. It is
+    the primary test whenever BOTH samples expose it.
+
+    FALLBACKS when ``boot_time`` is unavailable (a reporter built before it existed,
+    or an unreadable /proc/stat):
+
+      1. uptime moving backwards; and
+      2. the wall-clock estimate of the boot instant, ``collected_at - uptime``,
+         shifting between the two samples by more than ``_BOOT_SHIFT_TOL``.
+
+    Both fallbacks are HEURISTICS and are documented as such: a wall-clock-only
+    signal inherits clock-step and measurement-latency ambiguity.
+
+    Every comparison is written so it stays safe for arbitrary-size integers: a
+    subtraction involving a float operand would coerce a huge int to a C double and
+    raise OverflowError. Integer-vs-float COMPARISON never coerces, so the float case
+    is phrased as ``cu + 1.0 < pu``.
     """
+    pb, cb = _boot_time(prev_doc), _boot_time(cur_doc)
+    if pb is not None and cb is not None:
+        return cb != pb
+
     pu = (prev_doc or {}).get("host", {}).get("uptime_seconds")
     cu = (cur_doc or {}).get("host", {}).get("uptime_seconds")
     if pu is None or cu is None:
         return False
-    if cu >= pu:
+    if cu < pu:
+        if isinstance(pu, float) or isinstance(cu, float):
+            if cu + 1.0 < pu:
+                return True
+        elif (pu - cu) > 1.0:
+            return True
+    if prev_at is None or cur_at is None:
         return False
-    if isinstance(pu, float) or isinstance(cu, float):
-        return cu + 1.0 < pu
-    return (pu - cu) > 1.0
+    try:
+        shift = (cur_at - cu) - (prev_at - pu)
+        return abs(shift) > _BOOT_SHIFT_TOL
+    except (OverflowError, TypeError):
+        return False
 
 
 def compare(prev_stat, cur_stat, *, reboot=False, interval_seconds=None):

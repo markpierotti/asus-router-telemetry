@@ -286,7 +286,9 @@ class TestCleanupFailure(TempCase):
         st = s.load_state()
         self.assertFalse(st["last_attempt"]["cleanup_ok"])
         from rtax_telemetry.status import render_status
-        self.assertIn("cleanup: FAILED", render_status(s, st))
+        # The wording is "NOT CONFIRMED", not "FAILED": a removal that produced no
+        # positive evidence is recorded as unconfirmed, never as a clean failure.
+        self.assertIn("cleanup: NOT CONFIRMED", render_status(s, st))
 
 
 # ===================================================== master resource leak

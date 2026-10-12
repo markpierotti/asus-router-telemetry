@@ -57,8 +57,12 @@ def render_status(store, state, *, now=None, host=None, transport_name="ssh"):
             la.get("at"), la.get("outcome"), text, la.get("duration_s")))
         if la.get("detail"):
             lines.append("                        detail: %s" % la["detail"])
+        if la.get("remote_dir"):
+            lines.append("                        remote dir: %s (ownership=%s)" % (
+                la["remote_dir"], la.get("remote_ownership")))
         if la.get("cleanup_ok") is False:
-            lines.append("                        cleanup: FAILED: %s" % la.get("cleanup_detail"))
+            lines.append("                        cleanup: NOT CONFIRMED: %s"
+                         % la.get("cleanup_detail"))
     else:
         lines.append("  last attempt        : (none)")
 
@@ -88,4 +92,20 @@ def render_status(store, state, *, now=None, host=None, transport_name="ssh"):
         state.get("consecutive_failures", 0), state.get("consecutive_successes", 0)))
     lines.append("  thresholds          : open after %s failures, resolve after %s successes" % (
         th.get("open_after"), th.get("resolve_after")))
+
+    # Remote directories whose removal could NOT be confirmed. They are recorded
+    # precisely so a human can reconcile them read-only; nothing deletes them
+    # automatically.
+    try:
+        pending = store.pending_cleanup()
+    except Exception:                                   # noqa: BLE001
+        pending = []
+    if pending:
+        lines.append("  unconfirmed cleanup : %d entr%s in %s (manual reconciliation; "
+                     "never deleted automatically)" % (
+                         len(pending), "y" if len(pending) == 1 else "ies",
+                         store.pending_cleanup_path.name))
+        for rec in pending[-5:]:
+            lines.append("                        %s  %s  ownership=%s" % (
+                rec.get("at"), rec.get("remote_dir"), rec.get("remote_ownership")))
     return "\n".join(lines)
