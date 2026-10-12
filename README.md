@@ -48,7 +48,7 @@ Requires Docker with linux/amd64 support. The base image is pinned by digest, bu
 ## Components
 
 - `src/router_health.c`: reporter v1.0.4, schema `router_health/2`; host, uptime, **boot identity** (`host.boot_time`), CPU counters, load, memory, filesystem capacity, storage candidates and an explicit `limits` block. Output is always valid UTF-8/JSON, including under CPU-counter truncation (represented as `cpu_stat._truncated`); a metric that cannot be read is `null`, never 0; a failed stdout write exits non-zero. **Offline-validated only.**
-- `collector/`: foreground Python collector v1.5.1, bounded SSH transport with byte ceilings, non-blocking time-bounded transfer, hardened provisioning gates, a control-master liveness gate, sanitised diagnostics, an ownership-aware cleanup model with durable pending-cleanup evidence, local history, derived CPU measurements and collection incidents. **Offline-validated only.**
+- `collector/`: foreground Python collector v1.5.2, bounded SSH transport with byte ceilings, non-blocking time-bounded transfer, hardened provisioning gates, a control-master liveness gate, sanitised diagnostics, an ownership-aware cleanup model with durable pending-cleanup evidence, local history, derived CPU measurements and collection incidents. **Offline-validated only.**
 - `tests/`: embedded-test runner, JSON smoke check, synthetic `/proc` fixtures and reporter edge tests.
 - `docs/`: design, validation, hardware milestones and AI-assisted provenance.
 

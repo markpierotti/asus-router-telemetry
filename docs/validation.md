@@ -36,7 +36,7 @@ b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.
 > v1.0.4, so the two recipes agree bit for bit. apt packages remain unpinned, so a future rebuild on
 > updated packages may differ; the recorded package versions are the audit trail.
 
-Collector base version: **1.5.1** (offline-validated only). [Import manifest](import-manifest.json)
+Collector base version: **1.5.2** (offline-validated only). [Import manifest](import-manifest.json)
 records the bench-file and portable-copy hashes; only deliberate configuration differences (bench
 target, data dir, artifact/known_hosts defaults, documentation addresses) remain.
 
@@ -99,15 +99,15 @@ evidence modes, `fsync` on evidence writes, torn-line repair, duplicate-JSON-key
 (their bytes are historical evidence): `LEGACY_LAUNCHERS.md` in the bench reporter project records
 the exact weaknesses.
 
-**Verification.** 229 offline collector tests pass (137 at the start of the third remediation,
-**15 of them** added by the follow-up below): master loss and shutdown verification, failed-provision
+**Verification.** 252 offline collector tests pass (137 at the start of the third remediation;
+**15** were added by the follow-up below and **23** by the second follow-up): master loss and shutdown verification, failed-provision
 and teardown evidence, hostile 200 KiB diagnostics, the null-section contract, file modes, torn
 lines, hard stops, signal-driven teardown in both modes, and the boot-identity rules. The reporter's edge suite grew to 25 assertions and passes on the native
 build **and** on the ARM artifact under QEMU. `sh build-arm.sh` and the bench `build.sh` reproduce the
 **identical** ARM digest `17ade0d2…66e36` (self-test 8/8 under QEMU). The 17 bench fixture assertions
 and 5 comparator cases still pass against the new artifact.
 
-**This revision ran no hardware test.** Neither collector 1.5.1 nor reporter 1.0.4 has been executed
+**This revision ran no hardware test.** No collector 1.5.x and no reporter 1.0.4 has been executed
 on the unit; reconnection after a real transport failure, hardware interruption/cleanup paths,
 unattended authentication, long runs, reboot persistence, USB/NAS and AP operation all remain
 unvalidated.
@@ -127,8 +127,9 @@ third-remediation commit. They were corrected offline; the full detail is in
 
 **R3 is a rule, not a preference.** No process is signalled from a PID reported by
 `ssh`: a PID carries no executable, owner or start-identity evidence and can be reused.
-The consequence — a master that will not exit lingers until its `ControlPersist` idle
-timeout — is reported rather than acted on.
+The consequence — a master that will not exit is left running — is reported rather than
+acted on. (`ControlPersist` is an *idle* timeout; it is not a deadline by which a stuck
+or still-busy master is guaranteed to be gone, as an earlier wording here implied.)
 
 **Verification of the regressions themselves.** `collector/tests/test_followup_regressions.py`
 adds 15 tests. With the package reverted to its committed state and the new tests left
@@ -143,6 +144,57 @@ review's own reproduction against `/usr/bin/ssh`; this host has no live control 
 inspect, so the stderr channel was verified against the faithful double and the source,
 not against a running master. See the report's remaining-uncertainties section.
 
+## Second follow-up (offline)
+
+A focused re-check of the follow-up commit (`5059031`, collector 1.5.1) confirmed its
+improvements and reproduced two remaining gaps in the collector, plus one in the private
+acceptance instructions. They were corrected offline in collector **1.5.2**. The reporter
+source and the ARM artifact are unchanged, so nothing was rebuilt.
+
+| Finding | Defect reproduced | Correction |
+| --- | --- | --- |
+| A | R1 was incomplete. The collector read the provisioning facts only in the classifier branches that kept their own exception. `TransportUnreachableError` — reachable after an acknowledged `mkdir` through the multiplexed-command classifier — recorded no path, ownership `none` and `cleanup_ok: true`, and queued nothing. So did the timeout, authentication, host-key, malformed/schema, quota and generic branches | The exception a failed `start()` raises is kept at the single point it enters the collector, before classification, and the facts are read from there. No branch can drop them, the outcome class is untouched, and a failure with no facts attached changes nothing |
+| B | R2 was incomplete. `_exit_master` caught `BaseException` around `ssh -O exit`, so a cancellation during the master exit was swallowed: the run did not end 130, and with an absent socket it reported `shutdown-verified` | The cancellation is held for one bounded `-O check`, the verdict is recorded, the local resources are released, and it is re-raised. Two results name it (`…the -O exit command was interrupted`, `…the follow-up probe was interrupted`). Nothing is retried and no process is signalled |
+| C | The private acceptance sequence named superseded versions, and its sample validator read `os.environ['d']` although the operator is told to set `d` as a plain shell variable (`KeyError: 'd'`) | Private document, corrected there: the directory is passed to Python as an argument, and the versions, commit and test count describe the final state |
+
+**B has a consequence for A.** Once a cancellation can leave the transport's own failure
+handling it must carry the provisioning facts with it, and something must read them: a
+cancelled attempt is not classified, so no attempt record does. The collector therefore
+lifts them into the `teardown` record and the pending-cleanup log. The same path closes an
+older hole — a plain Ctrl-C during provisioning, after `mkdir`, whose removal then failed
+used to leave the directory unnamed. And "teardown was interrupted" is recorded by stage:
+an interrupt during the master exit that follows a *confirmed* removal queues no directory,
+and a removal that had already failed keeps its own reason rather than being called
+interrupted. Finally, an attempt that had *already been classified* when its own teardown
+was cancelled is still recorded: the cancellation is held for that one local write and
+then re-raised, where it used to take the attempt's outcome with it.
+
+**Verification of the regressions themselves.**
+`collector/tests/test_followup2_regressions.py` adds 23 tests: 17 regressions and 6 guards
+(what the correction must *not* change — the outcome class, a live session's ownership, the
+uninterrupted shutdown vocabulary). Against an isolated `git archive` snapshot of `5059031`
+with the new tests and test doubles in place, **all 17 regressions fail** (15 failures, 2
+errors) and all 6 guards pass; with the corrections all 23 pass. The working tree was never
+stashed or reverted to obtain that. The transport is the real `SSHTransport` throughout:
+driven by the fake `ssh` process for the link-loss case (the device acknowledges `mkdir`,
+then every later command, the removal included, exits 255 with a network diagnostic) and
+for three CLI cases that deliver a real `SIGINT` to a real process, and by a scripted
+stand-in for the one network-facing call where a cancellation has to land at an exact
+point.
+
+**Not established.** How the bench's Python and OpenSSH deliver a signal inside a real
+`ssh -O exit`, and what a real master does with a half-sent exit request, are not
+reproduced here: this host has no live control master. The follow-up check after an
+interrupted exit is one `-O check` with a 10 s bound, and its non-zero exit is read as
+"gone" exactly as it is for an uninterrupted shutdown.
+
+**Adjacent behaviour observed and deliberately left alone** (outside this correction, and
+unchanged by it): in `--loop` mode a teardown failure is written twice, because both the
+loop and the command close the collector — one event, two `teardown` records and two
+pending-cleanup entries; and when a provision *fails* (is not cancelled) while the master
+also cannot be confirmed stopped, the master's verdict is logged but not persisted, because
+it is only lifted into the collector when an established session is torn down.
+
 ## Prior investigation
 
 REA/Ghidra recovered a known-answer fixture whose outputs were 7, 10, 22, 37, -1; GNU objdump corroborated instructions. This covered a small, unoptimized, non-stripped ELF. The downloaded ASUS image was 386_52090; the physical router runs 386_45898. Image ABI observations cannot silently establish the live unit's ABI. Inventory identifies Linux 4.1.52 armv7l, four ARMv7 cores and approximately 498 MiB memory. GLIBC symbol strings alone do not identify an installed libc release.
@@ -156,7 +208,7 @@ The [collector hardware record](collector-hardware-test.md) records two mileston
 ## Repeatable repository checks
 
 - `make test-reporter`: native compile, **eight** embedded groups, compact/pretty JSON, synthetic `/proc` fixtures, and 25 reporter edge assertions (CPU truncation stays valid JSON; invalid-byte mount names stay valid UTF-8; an overlong `/proc/mounts` field is skipped and counted; a hostile BogoMIPS is escaped; `\000`/`\777` stay literal; `boot_time` is present/null correctly; a failed stdout write exits non-zero). macOS cannot validate real Linux `/proc` collection; fixture statvfs capacity comes from the executing host.
-- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus all three regression suites (`test_fixes.py`, `test_remediation.py`, `test_followup_regressions.py`). No router connection.
+- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus all four regression suites (`test_fixes.py`, `test_remediation.py`, `test_followup_regressions.py`, `test_followup2_regressions.py`). No router connection.
 - `make test`: both targets.
 - `sh build-arm.sh`: native Linux and ARM/QEMU checks plus static-link inspection, with toolchain hashes recorded.
 
@@ -164,10 +216,10 @@ The [collector hardware record](collector-hardware-test.md) records two mileston
 
 Executed for the portable repository update:
 
-- `make test` passed on macOS: eight embedded reporter groups, compact/pretty JSON, the synthetic `/proc` fixture assertions, 25 reporter edge assertions, and **229 collector tests (228 passed, one skipped)**. The controlling-PTY input tests passed with local terminal access.
+- `make test` passed on macOS: eight embedded reporter groups, compact/pretty JSON, the synthetic `/proc` fixture assertions, 25 reporter edge assertions, and **252 collector tests (251 passed, one skipped)**. The controlling-PTY input tests passed with local terminal access.
 - The third remediation revision was verified end to end on this host: the ARM artifact built with `sh build-arm.sh` passed its embedded groups (8/8) and the reporter edge suite (25/25) under QEMU, and reported `boot_time` and the `limits` block.
 - The bench `build.sh` independently reproduced the **same** ARM digest.
 - Packaged mock CLI, foreground-loop shutdown (exit 130 and lock release) and scenario demo passed.
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
 
-No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.1** and reporter **1.0.4** are **OFFLINE-VALIDATED ONLY**; the hardware-accepted pair remains collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.
+No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.2** and reporter **1.0.4** are **OFFLINE-VALIDATED ONLY**; the hardware-accepted pair remains collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.
