@@ -36,7 +36,7 @@ b15f6117a31eb8ce3a70d013ff6d3b1abe5e2140297cc2df03c8690abe8b0590   (reporter v1.
 > v1.0.4, so the two recipes agree bit for bit. apt packages remain unpinned, so a future rebuild on
 > updated packages may differ; the recorded package versions are the audit trail.
 
-Collector base version: **1.5.0** (offline-validated only). [Import manifest](import-manifest.json)
+Collector base version: **1.5.1** (offline-validated only). [Import manifest](import-manifest.json)
 records the bench-file and portable-copy hashes; only deliberate configuration differences (bench
 target, data dir, artifact/known_hosts defaults, documentation addresses) remain.
 
@@ -99,18 +99,49 @@ evidence modes, `fsync` on evidence writes, torn-line repair, duplicate-JSON-key
 (their bytes are historical evidence): `LEGACY_LAUNCHERS.md` in the bench reporter project records
 the exact weaknesses.
 
-**Verification.** 210 offline collector tests pass (137 previously, **73 new**): master loss and
-shutdown verification, failed-provision and teardown evidence, hostile 200 KiB diagnostics, the
-null-section contract, file modes, torn lines, hard stops, signal-driven teardown in both modes, and
-the boot-identity rules. The reporter's edge suite grew to 25 assertions and passes on the native
+**Verification.** 229 offline collector tests pass (137 at the start of the third remediation,
+**15 of them** added by the follow-up below): master loss and shutdown verification, failed-provision
+and teardown evidence, hostile 200 KiB diagnostics, the null-section contract, file modes, torn
+lines, hard stops, signal-driven teardown in both modes, and the boot-identity rules. The reporter's edge suite grew to 25 assertions and passes on the native
 build **and** on the ARM artifact under QEMU. `sh build-arm.sh` and the bench `build.sh` reproduce the
 **identical** ARM digest `17ade0d2…66e36` (self-test 8/8 under QEMU). The 17 bench fixture assertions
 and 5 comparator cases still pass against the new artifact.
 
-**This revision ran no hardware test.** Neither collector 1.5.0 nor reporter 1.0.4 has been executed
+**This revision ran no hardware test.** Neither collector 1.5.1 nor reporter 1.0.4 has been executed
 on the unit; reconnection after a real transport failure, hardware interruption/cleanup paths,
 unattended authentication, long runs, reboot persistence, USB/NAS and AP operation all remain
 unvalidated.
+
+## Follow-up remediation (offline)
+
+A second independent static review reproduced four remaining defects at the
+third-remediation commit. They were corrected offline; the full detail is in
+`RT-AX56U_REMEDIATION3_20261012.md` (follow-up section).
+
+| Finding | Defect reproduced | Correction |
+| --- | --- | --- |
+| R1 | Provisioning cleanup facts were folded in only for `ProvisioningError`; a `ControlMasterLost` or `ArtifactMismatch` ending the provisioning phase recorded `cleanup_ok: true` and lost the remote path | The transport attaches one `provision_facts` dict to whichever exception ends provisioning, and the collector folds it in for **every** class while preserving the outcome classification |
+| R2 | A cancellation during **teardown** was not recorded: `_drop_session` caught only `Exception`, and `release_lock()` ran after `close()`, so a raise there leaked the lock | Cancellations during teardown are recorded as UNCERTAIN removal and re-raised; the teardown record is written from a `finally` and the lock is released from its own independent `finally`; stop handlers stay installed through teardown |
+| R3 | Real macOS OpenSSH writes the `-O check` success diagnostic to **stderr**; the fake wrote stdout, so a stdout-only PID parse looked correct. Fixing the parse alone would have activated a fallback that signalled a cached PID with no identity check | The diagnostic is read from either stream; the PID-killing fallback was **removed** and the shutdown verdict became a distinct result (confirmed / still answering / probe incomplete / no master), with an unconfirmed shutdown persisted and reflected in the exit status |
+| R4 | The acceptance preservation step selected 25 files while expecting 28 (the three `.lock` files were omitted), validated no root independently, and used a truncated JSON display as the check | The evidence set is defined explicitly, each root is validated on its own, the comparison is like-for-like against the recorded manifest, and the display was replaced by explicit assertions |
+
+**R3 is a rule, not a preference.** No process is signalled from a PID reported by
+`ssh`: a PID carries no executable, owner or start-identity evidence and can be reused.
+The consequence — a master that will not exit lingers until its `ControlPersist` idle
+timeout — is reported rather than acted on.
+
+**Verification of the regressions themselves.** `collector/tests/test_followup_regressions.py`
+adds 15 tests. With the package reverted to its committed state and the new tests left
+in place, **all 15 fail** (10 failures, 5 errors); with the corrections in place all 15
+pass. That is the evidence that they test the defects and not themselves. Two further
+checks were confirmed: the acceptance preservation script passes on an untouched copy,
+stops on a one-byte change to a historical sample, and stops when a historical root is
+absent.
+
+**Not established.** The `ssh` behaviours behind R3 are OpenSSH source semantics plus the
+review's own reproduction against `/usr/bin/ssh`; this host has no live control master to
+inspect, so the stderr channel was verified against the faithful double and the source,
+not against a running master. See the report's remaining-uncertainties section.
 
 ## Prior investigation
 
@@ -125,7 +156,7 @@ The [collector hardware record](collector-hardware-test.md) records two mileston
 ## Repeatable repository checks
 
 - `make test-reporter`: native compile, **eight** embedded groups, compact/pretty JSON, synthetic `/proc` fixtures, and 25 reporter edge assertions (CPU truncation stays valid JSON; invalid-byte mount names stay valid UTF-8; an overlong `/proc/mounts` field is skipped and counted; a hostile BogoMIPS is escaped; `\000`/`\777` stay literal; `boot_time` is present/null correctly; a failed stdout write exits non-zero). macOS cannot validate real Linux `/proc` collection; fixture statvfs capacity comes from the executing host.
-- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus both remediation regression suites (`test_fixes.py`, `test_remediation.py`). No router connection.
+- `make test-collector`: offline schema, CPU derivation, incidents, retention, fake SSH, controlling-PTY input, watchdog and process cleanup, plus all three regression suites (`test_fixes.py`, `test_remediation.py`, `test_followup_regressions.py`). No router connection.
 - `make test`: both targets.
 - `sh build-arm.sh`: native Linux and ARM/QEMU checks plus static-link inspection, with toolchain hashes recorded.
 
@@ -133,10 +164,10 @@ The [collector hardware record](collector-hardware-test.md) records two mileston
 
 Executed for the portable repository update:
 
-- `make test` passed on macOS: eight embedded reporter groups, compact/pretty JSON, the synthetic `/proc` fixture assertions, 25 reporter edge assertions, and **210 collector tests (209 passed, one skipped)**. The controlling-PTY input tests passed with local terminal access.
+- `make test` passed on macOS: eight embedded reporter groups, compact/pretty JSON, the synthetic `/proc` fixture assertions, 25 reporter edge assertions, and **229 collector tests (228 passed, one skipped)**. The controlling-PTY input tests passed with local terminal access.
 - The third remediation revision was verified end to end on this host: the ARM artifact built with `sh build-arm.sh` passed its embedded groups (8/8) and the reporter edge suite (25/25) under QEMU, and reported `boot_time` and the `limits` block.
 - The bench `build.sh` independently reproduced the **same** ARM digest.
 - Packaged mock CLI, foreground-loop shutdown (exit 130 and lock release) and scenario demo passed.
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
 
-No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.0** and reporter **1.0.4** are **OFFLINE-VALIDATED ONLY**; the hardware-accepted pair remains collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.
+No hardware test was performed as part of repository preparation. Continuous hardware operation, persistence, unattended authentication, USB/NAS and AP integration remain future work. Collector **1.5.1** and reporter **1.0.4** are **OFFLINE-VALIDATED ONLY**; the hardware-accepted pair remains collector 1.4.0 / reporter 1.0.3 with artifact `3069b2bd…2ce0eb`.

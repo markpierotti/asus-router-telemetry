@@ -1,6 +1,6 @@
 # Foreground telemetry collector
 
-Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.5.0. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
+Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.5.1. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
 
 Requires macOS or a POSIX host with Python 3.11+ and OpenSSH for live use. It remains a foreground process; it creates no scheduled jobs, services or startup hooks.
 
@@ -83,4 +83,4 @@ Evidence files are created `0600` and their directories `0700` regardless of the
 
 ## Validation boundary
 
-The bench collector completed 17 accepted hardware samples (**collector v1.4.0 / reporter v1.0.3**, artifact `3069b2bd…2ce0eb`) with independently cross-checked CPU utilisation. Version 1.5.0 and reporter v1.0.4 are **offline-validated only**: no version of either has been run on the unit. See [hardware results](../docs/collector-hardware-test.md) and [validation](../docs/validation.md). Tests cover controlling-PTY input and terminal restoration, descendant cleanup, local execution of the remote watchdog strings, master loss and shutdown verification, failed-provision and teardown evidence, hostile diagnostics, the reporter-to-collector null contract, file modes and torn-line repair, fake-SSH transport, incidents, retention and schema checks. They are not an exhaustive audit or proof of long-term reliability.
+The bench collector completed 17 accepted hardware samples (**collector v1.4.0 / reporter v1.0.3**, artifact `3069b2bd…2ce0eb`) with independently cross-checked CPU utilisation. Version 1.5.1 and reporter v1.0.4 are **offline-validated only**: no version of either has been run on the unit. See [hardware results](../docs/collector-hardware-test.md) and [validation](../docs/validation.md). Tests cover controlling-PTY input and terminal restoration, descendant cleanup, local execution of the remote watchdog strings, master loss and shutdown verification, failed-provision and teardown evidence, hostile diagnostics, the reporter-to-collector null contract, file modes and torn-line repair, fake-SSH transport, incidents, retention and schema checks. They are not an exhaustive audit or proof of long-term reliability.
