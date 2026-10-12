@@ -12,13 +12,13 @@ A C reporter and Python collector developed through firmware analysis, cross-com
 | Firmware and live inventory | Downloaded 386_52090 examined; physical unit runs 386_45898, Linux 4.1.52 armv7l |
 | Custom reporter | Static ARM executable runs temporarily on stock firmware |
 | Parser comparison | 26 checks passed, zero failed; 10 separate-sample comparisons remained inconclusive |
-| SSH collector | Two real collections accepted, with artifact verification and cleanup recorded |
-| CPU utilisation | 1.62%, independently recalculated from the two saved aggregate counter sets |
+| SSH collector | One-shots plus a 14-sample supervised foreground loop accepted (17 samples), with artifact verification, watchdog proof and cleanup recorded |
+| CPU utilisation | Independently recalculated per sample pair (1.71%, 1.16%); all 13 loop deltas reproduced |
 | Independent review remediation | Two low-severity security findings (both needing an authenticated router) and six correctness findings fixed, each with a behavioural regression test |
 | Follow-up review remediation | Numeric-input containment (huge/overflowing JSON numbers classified, not crashed), strict JSON storage, and non-blocking time-bounded artifact transfer fixed, each with a behavioural regression test |
-| Continuous operation / unattended auth / AP / USB NAS | Not yet validated |
+| Continuous operation beyond ~13 min / unattended auth / AP / USB NAS / reconnection after a real failure | Not yet validated |
 
-The [next-phase Hermes prompt](docs/next-phase-prompt.md) prepares a short foreground monitoring trial.
+The [next-phase Hermes prompt](docs/next-phase-prompt.md) framed the foreground monitoring trial, which has since been completed — see the [collector hardware record](docs/collector-hardware-test.md).
 
 See [reporter hardware tests](docs/hardware-test.md), [collector hardware tests](docs/collector-hardware-test.md) and [validation](docs/validation.md). This is custom userspace software, not a custom firmware image or a deployed SOC.
 
