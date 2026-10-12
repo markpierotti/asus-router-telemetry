@@ -190,6 +190,11 @@ class TestRemoteWatchdogLocally(TempCase):
         dt = time.monotonic() - t0
         self.assertEqual(p.returncode, 137, "expected SIGKILL status")
         self.assertIn("router_health_exit=137", p.stderr)
+        # the REAL remote script must report POSITIVE watchdog-timer evidence, so a
+        # SIGKILL can be attributed to the bound rather than guessed at
+        self.assertIn("router_health_wd_fired=1", p.stderr)
+        self.assertTrue(os.path.exists(os.path.join(rd, "wd.fired")),
+                        "the watchdog did not leave its timer-fired marker")
         self.assertGreaterEqual(dt, 1.5)
         self.assertLess(dt, 8.0)
         self.assertFalse(os.path.exists(os.path.join(rd, "wd.pid")))
@@ -211,6 +216,49 @@ class TestRemoteWatchdogLocally(TempCase):
         script = transport.run_cmd(rd, 8)
         p = harness.run_local_script(script, self.tmp, timeout=12)
         self.assertEqual(p.returncode, 0)
+
+
+class TestWatchdogAttribution(TempCase):
+    """A SIGKILL (137) is ambiguous on its own: the watchdog's own kill and an OOM
+    kill look identical. The remote run must report POSITIVE timer-fired evidence,
+    and a kill WITHOUT it must not be reported as the bound."""
+
+    def test_a_timer_kill_is_attributed_to_the_bound(self):
+        tr = harness.make_transport(self.tmp, "timeout")
+        session = tr.start()
+        try:
+            with self.assertRaises(transport.RemoteTimeout) as cm:
+                tr.collect_sample(session)
+            self.assertIn("timer-fired evidence present", str(cm.exception))
+        finally:
+            tr.close()
+
+    def test_a_sigkill_without_timer_evidence_is_not_the_bound(self):
+        from rtax_telemetry.errors import RemoteCommandError
+        tr = harness.make_transport(self.tmp, "oom_kill")
+        store = self.store()
+        c = Collector(tr, store, log=lambda *a: None)
+        a = c.collect_once()
+        self.assertEqual(a["outcome"], "reporter_failure", a["detail"])
+        self.assertNotIn("timeout", a["outcome"])
+        self.assertIn("NOT attributable to the bound", a["detail"])
+        self.assertIn("out-of-memory", a["detail"])
+        c.close()
+
+    def test_the_marker_match_is_not_fooled_by_a_longer_digit_run(self):
+        self.assertFalse(transport._wd_fired(b"router_health_wd_fired=11"))
+        self.assertFalse(transport._wd_fired(b"router_health_wd_fired=0"))
+        self.assertFalse(transport._wd_fired(b""))
+        self.assertFalse(transport._wd_fired(None))
+        self.assertTrue(transport._wd_fired(b"router_health_wd_fired=1\n"))
+        self.assertTrue(transport._wd_fired(b"x\nrouter_health_wd_fired=1\nrouter_health_exit=137\n"))
+
+    def test_the_real_remote_text_reports_the_marker_both_ways(self):
+        # the SAME real command text, with and without the watchdog firing
+        rd = harness.remote_dir(self.tmp, "#!/bin/sh\necho '{\"schema\":\"x\"}'\n")
+        p = harness.run_local_script(transport.run_cmd(rd, 10), self.tmp, timeout=20)
+        self.assertEqual(p.returncode, 0)
+        self.assertIn("router_health_wd_fired=0", p.stderr)
 
 
 # ============================================================ watchdog gate

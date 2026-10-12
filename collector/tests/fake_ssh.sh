@@ -13,7 +13,8 @@
 #   ok                     everything succeeds (tools OK, watchdog kills at the bound)
 #   unreachable            whole invocation -> ssh exit 255, "Connection refused"
 #   authfail               whole invocation -> ssh exit 255, "Permission denied"
-#   timeout                reporter run killed (rc 137)
+#   timeout                reporter run killed (rc 137, watchdog timer-fired evidence)
+#   oom_kill               reporter run killed by SIGKILL with NO timer-fired evidence
 #   reporter_fail          reporter exits non-zero
 #   selftest_fail          watchdog self-test reports an UNBOUNDED job (exit 0)
 #   selftest_crash         self-test reports a CRASH status (139) with no timer fire
@@ -186,7 +187,11 @@ case "$cmd" in
       esac ;;
   *"out.json"*)
       case "$mode" in
-        timeout|timeout_cleanup_fail) exit 137 ;;
+        timeout|timeout_cleanup_fail)
+            printf 'router_health_wd_fired=1\n' 1>&2; exit 137 ;;
+        oom_kill)
+            # a SIGKILL with NO watchdog timer-fired evidence: an OOM kill looks the same
+            printf 'router_health_wd_fired=0\n' 1>&2; exit 137 ;;
         reporter_fail)                echo "reporter boom" 1>&2; exit 1 ;;
         slow_reporter)                sleep 30; cat "${FAKE_SSH_DOC:?FAKE_SSH_DOC not set}"; exit 0 ;;
         *)                            cat "${FAKE_SSH_DOC:?FAKE_SSH_DOC not set}"; exit 0 ;;

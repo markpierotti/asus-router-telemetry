@@ -182,18 +182,28 @@ def _wd_start(bound, target_var, pid_file, fired_file=None):
 def run_cmd(rd, bound):
     """The remote reporter run: stdout is JSON only, diagnostics on stderr, the
     reporter's own exit status preserved through ssh (``exit $ec``), and a signal
-    trap that cleans up the reporter and the watchdog."""
+    trap that cleans up the reporter and the watchdog.
+
+    Like the self-test, the watchdog writes a ``wd.fired`` marker IMMEDIATELY BEFORE
+    it kills its target, and this command reports whether that marker exists. Without
+    it a status of 137 (SIGKILL) is ambiguous: the watchdog's own SIGKILL and an OOM
+    kill look identical, so the cause could not be attributed.
+    """
     pid_file = "%s/wd.pid" % rd
+    fired_file = "%s/wd.fired" % rd
     return (
         "p=; w=\n"
         + _trap_line(pid_file)
+        + 'rm -f "%s"\n' % fired_file
         + '"%s/router_health" > "%s/out.json" 2> "%s/err.txt" &\n' % (rd, rd, rd)
         + "p=$!\n"
-        + _wd_start(bound, "p", pid_file)
+        + _wd_start(bound, "p", pid_file, fired_file)
         + 'ec=0\nwait "$p" || ec=$?\n'
         + _cancel(pid_file) + "\n"
         + 'cat "%s/out.json" 2>/dev/null\n' % rd
         + "printf 'router_health_exit=%s\\n' \"$ec\" 1>&2\n"
+        + 'if [ -f "%s" ]; then printf "router_health_wd_fired=1\\n" 1>&2; '
+          'else printf "router_health_wd_fired=0\\n" 1>&2; fi\n' % fired_file
         + 'cat "%s/err.txt" 1>&2\n' % rd
         + "exit $ec\n"
     )
@@ -292,6 +302,19 @@ def _tokens(raw):
 def _oneline(raw, limit=200):
     """A bounded, terminal-safe single-line rendering of captured device bytes."""
     return sanitize_detail(raw, limit=limit)
+
+
+def _wd_fired(raw):
+    """True when the remote run's stderr carries positive watchdog-timer evidence.
+
+    The remote command prints ``router_health_wd_fired=1`` only when the watchdog's
+    ``wd.fired`` marker exists, which it creates immediately before killing its
+    target. Matching a COMPLETE marker (never a prefix of a longer digit run) keeps
+    device-controlled text from forging or truncating the signal.
+    """
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8", "replace")
+    return bool(re.search(r"router_health_wd_fired=1(?!\d)", str(raw), re.ASCII))
 
 
 class _TerminalHandover:
@@ -1184,8 +1207,17 @@ class SSHTransport:
         bound = timeout if timeout is not None else self.run_bound + self.remote_grace
         rc, out, err = self._rsh(cmd, bound)
         if rc == _WD_SIGKILL_STATUS:
-            raise RemoteTimeout("reporter run was killed by the watchdog "
-                                "(rc=%d, SIGKILL)" % rc)
+            if _wd_fired(err):
+                raise RemoteTimeout("reporter run was killed by the remote watchdog "
+                                    "(rc=%d, SIGKILL, timer-fired evidence present)" % rc)
+            # A SIGKILL is ambiguous on its own: an OOM kill looks exactly the same.
+            # Without the timer-fired marker the cause is NOT established, so it is
+            # reported as a command failure rather than claimed to be the bound.
+            raise RemoteCommandError(rc, (
+                "reporter run was killed by SIGKILL (rc=%d) with NO watchdog timer-fired "
+                "evidence, so this is NOT attributable to the bound (an out-of-memory kill "
+                "looks identical). Treat the cause as unestablished: %s"
+                % (rc, _oneline(err))))
         if rc in _SIGNAL_STATUSES:
             # 129 is this script's own trap exit for HUP/INT/TERM; 130 and 143 are
             # SIGINT and SIGTERM. None of them is the watchdog's SIGKILL, and there
