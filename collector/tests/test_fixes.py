@@ -16,7 +16,15 @@ text under a local shell, real child processes, real files, real locks):
                                 out-of-range numeric telemetry rejected;
   * storage locking           — explicit prune refuses while collection holds the
                                 lock;
-  * storage budgets           — byte budgets and the per-write quota.
+  * storage budgets           — byte budgets and the per-write quota;
+  * numeric containment       — arbitrary-size JSON integers (which overflow a
+                                float conversion) are classified as schema_invalid
+                                instead of crashing validation or CPU derivation,
+                                and an exponent that overflows to a non-finite
+                                double is rejected at parse; stored JSON is strict;
+  * transfer time-bounding    — a partial stdin reader must not let a blocking
+                                write overrun the deadline; empty input, early
+                                closure and simultaneous output are all handled.
 
 No network I/O, no router contact.
 """
@@ -40,7 +48,8 @@ from rtax_telemetry import cpu, schema, transport                        # noqa:
 from rtax_telemetry.cli import acquire_lock, release_lock                 # noqa: E402
 from rtax_telemetry.core import Collector                                 # noqa: E402
 from rtax_telemetry.errors import (                                       # noqa: E402
-    MalformedData, OutputLimitExceeded, QuotaExceeded, SchemaInvalid, TransportError,
+    MalformedData, OutputLimitExceeded, QuotaExceeded, RemoteTimeout, SchemaInvalid,
+    TransportError,
 )
 from rtax_telemetry.store import Store                                    # noqa: E402
 
@@ -398,6 +407,232 @@ class TestStorageBudgets(TempCase):
         a = c.collect_once()
         self.assertEqual(a["outcome"], "storage_error")
         self.assertEqual(store.sample_count(), 0)
+
+
+# ==================================================== numeric containment (P1)
+class TestNumericContainment(unittest.TestCase):
+    """Huge / overflowing numbers are CLASSIFIED, never a numeric-check crash."""
+
+    def test_huge_uptime_integer_is_schema_invalid(self):
+        d = load_fixture()
+        d["host"]["uptime_seconds"] = 10 ** 400          # overflows float conversion
+        with self.assertRaises(SchemaInvalid):
+            schema.validate(d)
+
+    def test_huge_load_integer_is_schema_invalid(self):
+        d = load_fixture()
+        d["loadavg"]["load1"] = 10 ** 400
+        with self.assertRaises(SchemaInvalid):
+            schema.validate(d)
+
+    def test_huge_unsigned_counters_are_schema_invalid(self):
+        for mutate in (
+            lambda d: d["cpu"].__setitem__("count", 10 ** 400),
+            lambda d: d["loadavg"].__setitem__("procs_running", 10 ** 400),
+            lambda d: d["memory_kb"].__setitem__("MemTotal", 10 ** 400),
+            lambda d: d["cpu_stat"]["cpu"].__setitem__("user", 10 ** 400),
+            lambda d: d["filesystems"][0].__setitem__("total_bytes", 10 ** 400),
+        ):
+            d = load_fixture()
+            mutate(d)
+            with self.assertRaises(SchemaInvalid):
+                schema.validate(d)
+
+    def test_overflowing_exponent_in_an_extra_field_is_malformed(self):
+        # 1e999 parses to +inf; parse_constant does NOT see it (it is a number,
+        # not the literal token Infinity), so parse_float must reject it.
+        text = json.dumps(load_fixture())[:-1] + ',"extra":1e999}'
+        with self.assertRaises(MalformedData):
+            schema.parse(text)
+        with self.assertRaises(MalformedData):
+            schema.parse('{"a":-1e999}')
+
+    def test_ordinary_numbers_still_validate(self):
+        schema.validate(load_fixture())
+
+    def test_boolean_is_still_rejected_where_a_number_is_required(self):
+        d = load_fixture()
+        d["loadavg"]["load1"] = True
+        with self.assertRaises(SchemaInvalid):
+            schema.validate(d)
+
+
+class TestDerivationSafety(unittest.TestCase):
+    """cpu.py arithmetic must never raise on arbitrary-size integers."""
+
+    def test_pair_survives_a_huge_counter(self):
+        prev = {f: 0 for f in cpu.CPU_FIELDS}
+        cur = dict(prev, user=10 ** 400)
+        out = cpu._pair(prev, cur)                       # must not raise
+        self.assertEqual(out["state"], "ok")
+        self.assertEqual(out["util_percent"], 100.0)
+
+    def test_pair_normal_formula_is_unchanged(self):
+        prev = {"user": 100, "nice": 0, "system": 50, "idle": 850,
+                "iowait": 0, "irq": 0, "softirq": 0, "steal": 0}
+        cur = {"user": 200, "nice": 0, "system": 100, "idle": 1700,
+               "iowait": 0, "irq": 0, "softirq": 0, "steal": 0}
+        self.assertEqual(cpu._pair(prev, cur)["util_percent"], 15.0)
+
+    def test_detect_reboot_survives_huge_uptime(self):
+        big = {"host": {"uptime_seconds": 10 ** 400}}
+        self.assertFalse(cpu.detect_reboot(big, {"host": {"uptime_seconds": 10 ** 400}}))
+        self.assertTrue(cpu.detect_reboot(big, {"host": {"uptime_seconds": 5.0}}))
+
+
+class TestNumericRecovery(TempCase):
+    """A rejected response is a CLASSIFIED failure, and the same collector still
+    accepts a subsequent good response (no blanket handler, no lost session)."""
+
+    @staticmethod
+    def _mutated(mutate):
+        d = load_fixture()
+        mutate(d)
+        return json.dumps(d).encode()
+
+    def _run(self, payloads):
+        store = self.store()
+        c = Collector(ScriptedTransport(payloads), store, log=lambda *a: None)
+        return c, store
+
+    def test_huge_uptime_then_good_sample_is_accepted(self):
+        bad = self._mutated(lambda d: d["host"].__setitem__("uptime_seconds", 10 ** 400))
+        c, store = self._run([bad, load_fixture_bytes()])
+        self.assertEqual(c.collect_once()["outcome"], "schema_invalid")
+        self.assertEqual(c.collect_once()["outcome"], "success")
+        self.assertEqual(store.sample_count(), 1)
+
+    def test_huge_cpu_counter_does_not_crash_derivation_and_recovers(self):
+        # exactly bug B: first collection ok, second (huge counter) previously
+        # raised OverflowError in cpu.py and lost the attempt.
+        bad = self._mutated(lambda d: d["cpu_stat"]["cpu"].__setitem__("user", 10 ** 400))
+        good = load_fixture_bytes()
+        c, store = self._run([good, bad, good])
+        self.assertEqual(c.collect_once()["outcome"], "success")
+        self.assertEqual(c.collect_once()["outcome"], "schema_invalid")
+        self.assertEqual(c.collect_once()["outcome"], "success")
+        self.assertEqual(store.sample_count(), 2)
+        # every attempt was recorded, including the bad one
+        self.assertEqual(len(store.outcomes()), 3)
+
+    def test_extra_infinity_then_good_sample_is_accepted(self):
+        bad = json.dumps(load_fixture())[:-1].encode() + b',"extra":1e999}'
+        c, store = self._run([bad, load_fixture_bytes()])
+        self.assertEqual(c.collect_once()["outcome"], "malformed_data")
+        self.assertEqual(c.collect_once()["outcome"], "success")
+        self.assertEqual(store.sample_count(), 1)
+
+    def test_cli_huge_number_is_a_classified_failure_not_a_crash(self):
+        # the reviewer's CLI probe: previously exit 70 (UNEXPECTED ERROR) and no
+        # outcome recorded; now a classified failure with the attempt logged.
+        data = os.path.join(self.tmp, "d")
+        r = harness.run_cli(["collect", "--once", "--transport", "mock",
+                             "--mock-scenario", "huge_number", "--data-dir", data])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("outcome=schema_invalid", r.stderr)
+        self.assertNotIn("UNEXPECTED ERROR", r.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(data, "outcomes.jsonl")),
+                        "the failing attempt was not recorded")
+
+
+class TestStrictStoredJson(TempCase):
+    def test_stored_sample_and_state_never_contain_nonstandard_tokens(self):
+        c, store = self._run_and_collect()
+        for p in store.sample_paths():
+            text = p.read_text()
+            self.assertNotIn("Infinity", text)
+            self.assertNotIn("NaN", text)
+            json.loads(text)                              # strict, standard JSON
+        json.loads(store.state_path.read_text())
+
+    def test_non_finite_float_is_refused_by_the_store(self):
+        store = self.store()
+        with self.assertRaises(ValueError):
+            store.save_sample({"x": float("inf")})
+        with self.assertRaises(ValueError):
+            store.append_outcome({"x": float("nan")})
+
+    def _run_and_collect(self):
+        store = self.store()
+        c = Collector(ScriptedTransport([load_fixture_bytes()]), store, log=lambda *a: None)
+        self.assertEqual(c.collect_once()["outcome"], "success")
+        return c, store
+
+
+# ================================================= transfer time-bounding (P2)
+class TestTransferTimeBound(TempCase):
+    """The stdin write must be non-blocking so a partial reader cannot make the
+    transfer overrun its deadline. Finite local children drive the REAL code."""
+
+    def _script(self, body):
+        path = os.path.join(self.tmp, "child.py")
+        with open(path, "w") as fh:
+            fh.write(body)
+        return path
+
+    def _spawn(self, path):
+        return subprocess.Popen([sys.executable, path],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+
+    def test_partial_reader_does_not_block_past_the_deadline(self):
+        # the exact reviewer reproducer: child reads 4096 bytes then sleeps 2s,
+        # 1,000,000 input bytes, 0.2s deadline.
+        path = self._script("import os, time\nos.read(0, 4096)\ntime.sleep(2)\n")
+        p = self._spawn(path)
+        t0 = time.monotonic()
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                transport._drain_bounded(p, 0.2, b"x" * 1000000, 1 << 20, 1 << 20)
+            dt = time.monotonic() - t0
+            self.assertLess(dt, 1.0,
+                            "stdin write blocked past the deadline (%.2fs)" % dt)
+        finally:
+            transport._terminate_and_reap(p)
+
+    def test_run_bounded_partial_reader_respects_deadline(self):
+        path = self._script("import os, time\nos.read(0, 4096)\ntime.sleep(10)\n")
+        t0 = time.monotonic()
+        with self.assertRaises(RemoteTimeout):
+            transport.run_bounded([sys.executable, path], 0.3, stdin_bytes=b"w" * 1000000)
+        self.assertLess(time.monotonic() - t0, 2.0)
+
+    def test_successful_transfer_delivers_every_byte(self):
+        path = self._script("import sys\n"
+                            "data = sys.stdin.buffer.read()\n"
+                            "sys.stdout.write('%d' % len(data))\n")
+        p = self._spawn(path)
+        out, err = transport._drain_bounded(p, 10, b"y" * 200000, 1 << 20, 1 << 20)
+        transport._terminate_and_reap(p)
+        self.assertEqual(out, b"200000")
+
+    def test_empty_input_is_closed_so_the_child_sees_eof(self):
+        path = self._script("import sys\n"
+                            "data = sys.stdin.buffer.read()\n"
+                            "sys.stdout.write('got:%d' % len(data))\n")
+        p = self._spawn(path)
+        out, err = transport._drain_bounded(p, 5, b"", 1 << 20, 1 << 20)
+        transport._terminate_and_reap(p)
+        self.assertEqual(out, b"got:0")
+
+    def test_early_stdin_closure_is_handled(self):
+        # the child closes its stdin immediately: the write must not raise past
+        # the caller, it is treated as "input finished".
+        path = self._script("import os, time\nos.close(0)\ntime.sleep(0.3)\n")
+        p = self._spawn(path)
+        out, err = transport._drain_bounded(p, 5, b"z" * 500000, 1 << 20, 1 << 20)
+        transport._terminate_and_reap(p)
+        self.assertEqual(out, b"")
+
+    def test_simultaneous_output_and_timeout_reaps_cleanly(self):
+        path = self._script("import sys, time\n"
+                            "sys.stdout.buffer.write(b'x' * 200000)\n"
+                            "sys.stdout.flush()\n"
+                            "time.sleep(30)\n")
+        t0 = time.monotonic()
+        with self.assertRaises(RemoteTimeout):
+            transport.run_bounded([sys.executable, path], 0.5, stdin_bytes=b"q" * 500000)
+        self.assertLess(time.monotonic() - t0, 3.0)
 
 
 if __name__ == "__main__":
