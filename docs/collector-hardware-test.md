@@ -2,7 +2,7 @@
 
 Date: 2026-10-12, Australia/Brisbane. All collections were run interactively by Mark Pierotti on one physical RT-AX56U (stock firmware) using the private bench collector against the reporter artifact recorded below. Raw samples, session timestamps, network identifiers, login material and host keys remain outside this repository.
 
-Two revisions have now been accepted on the unit. The **current** milestone (collector v1.4.0 / reporter v1.0.3) is described second; the earlier milestone (collector v1.2.0 / reporter v1.0.2) is kept as historical evidence for that revision.
+Two revisions have now been accepted on the unit. The **current** milestone (collector v1.4.0 / reporter v1.0.3) is described first, followed by the earlier milestone (collector v1.2.0 / reporter v1.0.2) as historical evidence for that revision.
 
 ---
 
@@ -23,7 +23,7 @@ Reporter artifact SHA-256:
 | 3 | Foreground loop `--loop --interval 60`, 14 samples | **14/14 `success`**, one password prompt, watchdog and artifact gates run once, clean Ctrl-C, no incident |
 | 4 | Post-stop one-shot (lock-release proof) | **exit 0**, `success`, CPU utilisation **1.16%** |
 
-Each run showed the full gate sequence: password accepted → SSH master established → temporary directory created → watchdog self-test killed its long job after three seconds with **status 137 and positive timer evidence** → router-side artifact SHA-256 matched the recorded digest before execution → `outcome=success` → silent cleanup. No gate failure, no hash mismatch and no separate cleanup failure occurred; nothing was deployed or left running.
+Each new SSH session showed the full gate sequence: password accepted → SSH master established → temporary directory created → watchdog self-test killed its long job after three seconds with **status 137 and positive timer evidence** → router-side artifact SHA-256 matched the recorded digest before execution → `outcome=success` → silent cleanup. No gate failure, no hash mismatch and no separate cleanup failure occurred; nothing was deployed or left running.
 
 ### Independent CPU checks
 
@@ -37,10 +37,10 @@ Utilisation was recomputed independently from the saved aggregate `cpu_stat` cou
 
 Router uptime advanced monotonically across the loop. It also demonstrated two operational properties: the loop reused one SSH master (a single password prompt for all 14 samples), and the foreground lock was released on Ctrl-C — proven by the successful post-stop one-shot, since a still-held lock would have refused it.
 
-### Recorded measurement notes (not defects)
+### Recorded measurement notes
 
-- **First loop window vs attempt-start spacing.** For the first loop pair the measurement window — the interval the CPU counters actually accumulated over — was **48.1 seconds** (equal to the router uptime advance), while the stored `interval_seconds` of **60.005** describes attempt-start spacing (the local-monotonic delta between the two attempts' start times). The two diverge only for that pair because the first attempt carried about 12 seconds of provisioning before the reporter ran; later pairs are about 60.0 seconds on both. This is an alignment note: the utilisation uses the aggregate counter delta, whose elapsed time is the measurement window.
-- **Per-field 1-jiffy snapshot.** The aggregate `/proc/stat` `cpu` line differs from the sum of the per-CPU lines by 0–5 jiffies (about 0.0000%). It is present at the same magnitude in the earlier v1.0.2 samples, so it is a long-standing property of reading `/proc/stat` (the aggregate and per-CPU lines are formatted a tick apart) and does not affect the aggregate-line utilisation.
+- **Measurement window vs attempt-start spacing.** The first loop pair spans **48.1 seconds** of router uptime, while the stored `interval_seconds` of **60.005** describes the local-monotonic spacing between attempt starts. The first attempt carries about 12 seconds of provisioning before the reporter runs. Later pairs within the reused session are about 60 seconds on both measures. Provisioning a new session for the post-stop collection produces another difference: **445.6 seconds** of router uptime versus **430.970 seconds** between attempt starts. The stored interval therefore describes collection scheduling, not exact measurement spacing. CPU utilisation uses the aggregate counter ratio and does not depend on that stored interval.
+- **Small aggregate/per-CPU differences.** The aggregate `/proc/stat` `cpu` line differs from the sum of the per-CPU lines by 0–5 jiffies in the inspected samples. Differences of the same magnitude occur in the earlier v1.0.2 samples. Their cause was not independently established; the utilisation checks compare successive aggregate lines and do not require equality with the sum of the per-CPU lines.
 
 ---
 
@@ -82,4 +82,4 @@ The tested implementation used private bench defaults. This repository adapts pa
 - Hardware interruption and cleanup-failure paths (exercised only in the offline suite).
 - Unattended (key-based) authentication. The current transport explicitly selects password authentication; adding an SSH key alone would not enable unattended use without code/config support.
 - Reboot persistence, USB/NAS storage and AP-mode operation.
-- CPU overhead was not benchmarked and the platform's USER_HZ was assumed (not measured); utilisation is a two-sample difference, not a rate calibration.
+- Monitoring overhead was not benchmarked; the utilisation checks validate counter ratios, not the monitor's incremental CPU cost.
