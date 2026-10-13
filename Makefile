@@ -15,6 +15,7 @@ test-reporter: out/router_health
 	python3 tests/smoke.py ./out/router_health
 	bash tests/fixture_tests.sh ./out/router_health
 	bash tests/reporter_edge_tests.sh ./out/router_health
+	python3 tests/reporter_audit_regressions.py ./out/router_health
 
 test-collector:
 	cd collector && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
