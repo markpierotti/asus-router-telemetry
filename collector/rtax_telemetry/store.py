@@ -234,7 +234,7 @@ class Store:
                 % (len(payload), self.max_sample_bytes))
         path = self.samples_dir / (utc_stamp(ts) + ".json")
         self._atomic_write(path, payload)
-        self.prune_samples(newest=path)
+        self.prune_samples(newest=path, protect_newest=True)
         return path
 
     def last_sample(self):
@@ -338,7 +338,7 @@ class Store:
     def append_outcome(self, rec):
         self.ensure()
         self._append_jsonl(self.outcomes_path, rec)
-        self.prune_outcomes()
+        self.prune_outcomes(keep_last=True)
 
     def outcomes(self, limit=None):
         if not self.outcomes_path.is_file():
@@ -434,7 +434,8 @@ class Store:
 
         Sample names are wall-clock stamps, so name order is age order only while
         the clock moves forward. ``newest`` is the sample ``save_sample`` has just
-        written: whatever its name says, every other sample is older. Samples named
+        written, or for a standalone ``prune`` the last accepted sample that state
+        names: whatever its name says, every other sample is older. Samples named
         LATER than it were therefore written before the clock stepped back; they go
         first, then the samples named earlier, and ``newest`` itself last. With a
         forward clock nothing is named later, and this is plain name order.
@@ -450,11 +451,19 @@ class Store:
         return ([p for p in paths if p.name > newest.name]
                 + [p for p in paths if p.name < newest.name] + [newest])
 
-    def prune_samples(self, newest=None):
-        """Trim oldest samples until BOTH the record count and byte budget hold."""
-        paths = self._prune_order(newest)
+    def prune_samples(self, newest=None, protect_newest=False):
+        """Trim oldest samples until BOTH the record count and byte budget hold.
+
+        ``protect_newest`` is set by ``save_sample``: the file it has just written is
+        then never a candidate, whatever the limits say, so a successful attempt
+        cannot delete its own evidence. A standalone ``prune`` leaves it unset - it
+        only orders by ``newest`` - so an explicit purge still removes everything.
+        """
+        order = self._prune_order(newest)
+        keep = newest if (protect_newest and newest in order) else None
+        paths = [p for p in order if p != keep]
         removed = 0
-        excess = len(paths) - self.retain_samples
+        excess = len(order) - self.retain_samples
         for p in paths[:max(0, excess)]:
             try:
                 p.unlink()
@@ -462,7 +471,7 @@ class Store:
             except OSError:
                 pass
         paths = [p for p in paths if p.exists()]
-        total = sum(_size(p) for p in paths)
+        total = sum(_size(p) for p in paths) + (_size(keep) if keep else 0)
         i = 0
         while total > self.retain_sample_bytes and i < len(paths):
             try:
@@ -474,8 +483,11 @@ class Store:
             i += 1
         return removed
 
-    def prune_outcomes(self):
+    def prune_outcomes(self, keep_last=False):
         """Trim oldest outcome lines until count and byte budgets both hold.
+
+        ``keep_last`` is set by ``append_outcome``: the line it has just written is
+        then never trimmed, whatever the limits say.
 
         The rewrite uses a unique temporary name, so a concurrent append in another
         process cannot share (and then lose) a fixed ``*.tmp`` file.
@@ -487,10 +499,11 @@ class Store:
         sizes = [len(ln.encode("utf-8")) for ln in lines]
         total = sum(sizes)
         i = 0
-        while i < len(lines) - self.retain_outcomes:
+        stop = len(lines) - (1 if keep_last and lines else 0)
+        while i < len(lines) - self.retain_outcomes and i < stop:
             total -= sizes[i]
             i += 1
-        while total > self.retain_outcome_bytes and i < len(lines):
+        while total > self.retain_outcome_bytes and i < stop:
             total -= sizes[i]
             i += 1
         if i <= 0:
@@ -500,7 +513,11 @@ class Store:
         return i
 
     def prune(self):
-        return self.prune_samples() + self.prune_outcomes()
+        """Standalone retention. The last accepted sample that state names is the
+        newest whatever its file name says, so it is the last sample to go."""
+        located = self._state_sample_path()
+        newest = Path(located) if located else None
+        return self.prune_samples(newest=newest) + self.prune_outcomes()
 
 
 def time_now():

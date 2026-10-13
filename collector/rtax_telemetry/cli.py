@@ -15,6 +15,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import signal
 import sys
 import time
@@ -146,6 +147,28 @@ class ConfigUnreadable(Exception):
     """config.json exists but could not be read as a JSON object."""
 
 
+# Every key config.json may carry. A key outside this set is a spelling mistake as
+# far as the collector can tell, and the option it was meant to set would silently
+# keep its default.
+CONFIG_KEYS = frozenset((
+    "data_dir", "host", "user", "ssh", "artifact", "artifact_sha", "known_hosts",
+    "known_hosts_sha", "connect_timeout", "run_bound", "control_persist",
+    "watchdog_selftest", "watchdog_selftest_bound", "interactive_auth",
+    "max_stdout_bytes", "max_stderr_bytes", "retain_samples", "retain_outcomes",
+    "retain_sample_bytes", "retain_outcome_bytes", "max_sample_bytes",
+    "open_after", "resolve_after", "interval",
+))
+
+
+def _no_repeated_keys(pairs):
+    cfg = {}
+    for k, v in pairs:
+        if k in cfg:
+            raise ValueError("key %r appears more than once" % k)
+        cfg[k] = v
+    return cfg
+
+
 def load_config(data_dir, strict=False):
     """The operator's config.json, or {} when there is none.
 
@@ -153,21 +176,33 @@ def load_config(data_dir, strict=False):
     limits (collect, prune): a file that exists but cannot be read raises
     ConfigUnreadable there, because falling back to the defaults would prune
     evidence the configured limits keep. Read-only commands warn and use defaults.
+
+    "Exists" is asked with lexists: a dangling symlink or a directory named
+    config.json is a configuration that did not load, not an absent one. So is a
+    file with a repeated key or a key the collector does not know.
     """
     path = os.path.join(os.path.expanduser(str(data_dir or DEFAULT_DATA_DIR)), "config.json")
-    if not os.path.isfile(path):
+    if not os.path.lexists(path):
         return {}
     try:
+        if not os.path.isfile(path):
+            raise ValueError("config.json is not a regular file")
         with open(path) as fh:
-            cfg = json.load(fh)
+            cfg = json.load(fh, object_pairs_hook=_no_repeated_keys)
         if not isinstance(cfg, dict):
             raise ValueError("config.json must be an object")
-        return cfg
     except (OSError, ValueError) as e:
         if strict:
             raise ConfigUnreadable("unreadable config.json (%s)" % e)
         log("WARNING: ignoring unreadable config.json (%s)" % e)
         return {}
+    unknown = sorted(k for k in cfg if k not in CONFIG_KEYS)
+    if unknown:
+        names = ", ".join(sanitize_detail(k) for k in unknown)
+        if strict:
+            raise ConfigUnreadable("config.json has unknown key(s): %s" % names)
+        log("WARNING: config.json has unknown key(s), ignored: %s" % names)
+    return cfg
 
 
 def cfg_get(args, cfg, name, default):
@@ -270,21 +305,52 @@ def build_store(args, cfg):
 
 RETENTION_OPTIONS = ("retain_samples", "retain_outcomes",
                      "retain_sample_bytes", "retain_outcome_bytes")
+SIZE_OPTIONS = RETENTION_OPTIONS + ("max_sample_bytes",)
 
 
-def retention_below_one(args, cfg):
-    """Names of retention limits that are set, by flag or config, below 1.
+def invalid_limits(args, cfg, purge_by_flag=False):
+    """The retention and size limits that are set to something unusable.
 
-    Collection prunes after every write, so such a limit deletes the sample or the
-    outcome record the attempt has just produced. `prune` is the explicit purge and
-    does not apply this check.
+    A value from config.json must be a whole number of at least 1: a boolean, a
+    string, a fraction, a null or a zero there is a mistake, not a request, and it
+    is refused by `collect` and `prune` alike. A command-line flag must be at least
+    1 too, except that ``purge_by_flag`` (`prune`) lets a retention flag be 0 - the
+    explicit purge. Collection prunes after every write, so it never accepts 0.
     """
     bad = []
-    for name in RETENTION_OPTIONS:
-        v = cfg_get(args, cfg, name, None)
-        if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 1):
-            bad.append("%s=%r" % (name, v))
+    for name in SIZE_OPTIONS:
+        flag = getattr(args, name, None)
+        if flag is not None:
+            least = 0 if (purge_by_flag and name in RETENTION_OPTIONS) else 1
+            if flag < least:
+                bad.append("--%s %r" % (name.replace("_", "-"), flag))
+        elif name in cfg:
+            v = cfg[name]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                bad.append("%s=%s in config.json" % (name, sanitize_detail(repr(v))))
     return bad
+
+
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def known_hosts_sha_error(value):
+    """Why ``known_hosts_sha`` is unusable, or None.
+
+    It is the SHA-256 of the pinned known_hosts FILE (64 lower-case hex digits), or
+    exactly ``false`` to run without that check. It is not host-key verification,
+    which ssh always performs against the pinned file. Nothing else opts out: 0, an
+    empty list or an empty object is a mistake, not a decision.
+    """
+    if value is False:
+        return None
+    if value is None or value == "":
+        return ("known_hosts_sha is not configured, so the pinned known_hosts file "
+                "would not be hash-checked")
+    if not isinstance(value, str) or not _SHA256_HEX.fullmatch(value):
+        return ("known_hosts_sha must be 64 lower-case hex digits (got %s)"
+                % sanitize_detail(repr(value), 80))
+    return None
 
 
 def build_collector(args, cfg, transport, store, host_label):
@@ -305,17 +371,25 @@ def cmd_collect(args):
     except ConfigUnreadable as e:
         log("FATAL: %s; not collecting with default limits" % e)
         return EXIT_BAD_OPTION
-    bad = retention_below_one(args, cfg)
+    bad = invalid_limits(args, cfg)
     if bad:
         log("FATAL: retention limits must be whole numbers of at least 1 during "
-            "collection (%s); use `prune` to purge" % ", ".join(bad))
+            "collection (%s); to purge, use `prune` with the limit given as a "
+            "command-line flag" % ", ".join(bad))
+        return EXIT_BAD_OPTION
+    budget = cfg_get(args, cfg, "retain_sample_bytes", DEFAULT_RETAIN_SAMPLE_BYTES)
+    largest = cfg_get(args, cfg, "max_sample_bytes", DEFAULT_MAX_SAMPLE_BYTES)
+    if budget < largest:
+        log("FATAL: retain_sample_bytes (%d) is below max_sample_bytes (%d): one "
+            "sample could exceed the whole retention budget. Raise the budget or "
+            "lower max_sample_bytes" % (budget, largest))
         return EXIT_BAD_OPTION
     if args.transport == "ssh":
-        kh_sha = cfg_get(args, cfg, "known_hosts_sha", EXPECT_KNOWN_HOSTS_SHA)
-        if kh_sha is None or kh_sha == "":
-            log("FATAL: known_hosts_sha is not configured, so the pinned known_hosts "
-                "file would not be hash-checked. Set it to the file's SHA-256, or to "
-                "false to run without the check (a warning is logged on every run)")
+        why = known_hosts_sha_error(
+            cfg_get(args, cfg, "known_hosts_sha", EXPECT_KNOWN_HOSTS_SHA))
+        if why:
+            log("FATAL: %s. Set it to the file's SHA-256, or to false to run "
+                "without the check (a warning is logged on every run)" % why)
             return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     try:
@@ -499,6 +573,11 @@ def cmd_prune(args):
         cfg = load_config(args.data_dir, strict=True)
     except ConfigUnreadable as e:
         log("FATAL: %s; not pruning with default limits" % e)
+        return EXIT_BAD_OPTION
+    bad = invalid_limits(args, cfg, purge_by_flag=True)
+    if bad:
+        log("FATAL: retention limits must be whole numbers of at least 1, or 0 as a "
+            "command-line flag to purge (%s); nothing was pruned" % ", ".join(bad))
         return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     # prune REWRITES the outcomes log and unlinks samples: it must take the SAME
