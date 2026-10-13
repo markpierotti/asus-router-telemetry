@@ -181,6 +181,14 @@ class TestPruneRefusesMistypedConfig(CliCase):
         self.assertNotEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(self.samples()), 8)
 
+    def test_a_config_byte_budget_below_one_sample_is_not_a_purge(self):
+        """REGRESSION: `retain_sample_bytes: 1` in config, refused by collect, is refused by prune."""
+        self.seed()
+        self.write_config({"retain_sample_bytes": 1})
+        r = self.prune()
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.samples()), 8)
+
     def test_a_whole_number_in_config_is_applied(self):
         """GUARD: `retain_samples: 3` makes prune keep three."""
         self.seed()

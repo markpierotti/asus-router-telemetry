@@ -331,6 +331,24 @@ def invalid_limits(args, cfg, purge_by_flag=False):
     return bad
 
 
+def sample_budget_error(args, cfg, purge_by_flag=False):
+    """Why the sample byte budget is unusable, or None.
+
+    A budget below ``max_sample_bytes`` cannot hold even one sample of the size the
+    collector accepts. With ``purge_by_flag`` (`prune`) a budget given as a
+    command-line flag is exempt: that is the explicit way to cut the store down.
+    """
+    if purge_by_flag and getattr(args, "retain_sample_bytes", None) is not None:
+        return None
+    budget = cfg_get(args, cfg, "retain_sample_bytes", DEFAULT_RETAIN_SAMPLE_BYTES)
+    largest = cfg_get(args, cfg, "max_sample_bytes", DEFAULT_MAX_SAMPLE_BYTES)
+    if budget < largest:
+        return ("retain_sample_bytes (%d) is below max_sample_bytes (%d): one sample "
+                "could exceed the whole retention budget. Raise the budget or lower "
+                "max_sample_bytes" % (budget, largest))
+    return None
+
+
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
@@ -377,12 +395,9 @@ def cmd_collect(args):
             "collection (%s); to purge, use `prune` with the limit given as a "
             "command-line flag" % ", ".join(bad))
         return EXIT_BAD_OPTION
-    budget = cfg_get(args, cfg, "retain_sample_bytes", DEFAULT_RETAIN_SAMPLE_BYTES)
-    largest = cfg_get(args, cfg, "max_sample_bytes", DEFAULT_MAX_SAMPLE_BYTES)
-    if budget < largest:
-        log("FATAL: retain_sample_bytes (%d) is below max_sample_bytes (%d): one "
-            "sample could exceed the whole retention budget. Raise the budget or "
-            "lower max_sample_bytes" % (budget, largest))
+    why = sample_budget_error(args, cfg)
+    if why:
+        log("FATAL: %s" % why)
         return EXIT_BAD_OPTION
     if args.transport == "ssh":
         why = known_hosts_sha_error(
@@ -578,6 +593,10 @@ def cmd_prune(args):
     if bad:
         log("FATAL: retention limits must be whole numbers of at least 1, or 0 as a "
             "command-line flag to purge (%s); nothing was pruned" % ", ".join(bad))
+        return EXIT_BAD_OPTION
+    why = sample_budget_error(args, cfg, purge_by_flag=True)
+    if why:
+        log("FATAL: %s; nothing was pruned" % why)
         return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     # prune REWRITES the outcomes log and unlinks samples: it must take the SAME
