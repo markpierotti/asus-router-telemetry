@@ -25,8 +25,8 @@ for options in ([], ["--pretty"]):
     if boot is not None and (not isinstance(boot, (int, float)) or boot <= 0):
         raise SystemExit(f"boot_time is neither null nor a positive epoch: {boot!r}")
     limits = document["limits"]
-    for key in ("file_read_max_bytes", "files_truncated", "mounts_max", "mounts_seen",
-                "mounts_overlong", "mounts_truncated"):
+    for key in ("file_read_max_bytes", "files_truncated", "mounts_max", "mounts_readable",
+                "mounts_seen", "mounts_overlong", "mounts_truncated"):
         if key not in limits:
             raise SystemExit(f"limits block is missing {key}")
     if limits["mounts_seen"] < limits["mounts_overlong"]:

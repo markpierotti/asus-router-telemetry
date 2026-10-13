@@ -34,7 +34,7 @@
 #include <math.h>
 
 #define TOOL_NAME    "router_health"
-#define TOOL_VERSION "1.0.4"
+#define TOOL_VERSION "1.0.5"
 #define SCHEMA       "router_health/2"
 
 /* Hard bounds. Each exists so that a pathological /proc file cannot make the tool
@@ -42,12 +42,14 @@
    TRUNCATION IS ALWAYS REPORTED: the document carries a "limits" block naming the
    bound, how many mount records were SEEN, how many were skipped as overlong and
    how many files were read partially, so a silently short answer cannot be mistaken
-   for a complete one. */
+   for a complete one. The block is the LAST member of the document: it is printed
+   after every file has been read, so its counts cover all of them. */
 #define SLURP_MAX      (4u * 1024u * 1024u)   /* max bytes read from any one file   */
 #define CPUSTAT_MAX    (64u * 1024u)          /* max serialised cpu_stat body size  */
 #define STATVFS_MAX_ENTRIES 512               /* max mounts considered              */
 
-/* Counts of files whose read hit SLURP_MAX. Reported in "limits". */
+/* Counts of files read partially: the read hit SLURP_MAX with data still to come,
+   or failed part-way. Reported in "limits". */
 static int g_files_truncated = 0;
 
 /* Test hook: --proc-root DIR re-points every /proc read at DIR. Read-only, no
@@ -63,8 +65,9 @@ static const char *pf(const char *name)
 
 /* ---------------------------------------------------------------- helpers */
 
-/* `truncated` (may be NULL) is set to 1 when the file was larger than SLURP_MAX and
-   the read stopped at the bound. */
+/* `truncated` (may be NULL) is set to 1 when the file was larger than the bound and
+   the read stopped there, or when the read failed part-way. A file that ENDS exactly
+   at the bound is complete, so one more byte is probed before it is counted. */
 static char *slurp(const char *path, int *truncated)
 {
     if (truncated) *truncated = 0;
@@ -78,8 +81,10 @@ static char *slurp(const char *path, int *truncated)
         len += n;
         if (len + 1 >= cap) {
             if (cap >= SLURP_MAX) {                      /* bounded: stop growing */
-                if (truncated) *truncated = 1;
-                g_files_truncated++;
+                if (fgetc(f) != EOF) {
+                    if (truncated) *truncated = 1;
+                    g_files_truncated++;
+                }
                 break;
             }
             size_t ncap = cap * 2;
@@ -88,6 +93,10 @@ static char *slurp(const char *path, int *truncated)
             if (!nb) { free(buf); fclose(f); return NULL; }
             buf = nb; cap = ncap;
         }
+    }
+    if (ferror(f) && !(truncated && *truncated)) {
+        if (truncated) *truncated = 1;
+        g_files_truncated++;
     }
     buf[len] = '\0';
     fclose(f);
@@ -230,8 +239,29 @@ static int cpustat_append(char *body, size_t cap, size_t *len, int first,
     return 1;
 }
 
+/* A cpu_stat key is printed as a JSON member name without escaping, so only the
+   forms the kernel emits are accepted: "cpu", or "cpu" and up to 10 digits. */
+static int cpustat_key_ok(const char *key)
+{
+    if (strncmp(key, "cpu", 3) != 0) return 0;
+    size_t n = strlen(key + 3);
+    if (n > 10) return 0;
+    for (size_t i = 0; i < n; i++)
+        if (key[3 + i] < '0' || key[3 + i] > '9') return 0;
+    return 1;
+}
+
+/* True when `key` (already checked by cpustat_key_ok) is a member of `body`. */
+static int cpustat_has(const char *body, const char *key)
+{
+    char pat[24];
+    snprintf(pat, sizeof pat, "\"%s\":", key);
+    return strstr(body, pat) != NULL;
+}
+
 /* Per-CPU and aggregate jiffies counters. Cumulative, USER_HZ (typically 100 Hz);
-   utilisation requires two samples. null when /proc/stat is unavailable. */
+   utilisation requires two samples. null when /proc/stat is unavailable. A line
+   whose key is malformed, or repeats one already emitted, is skipped. */
 static void emit_cpu_stat(void)
 {
     int itrunc = 0;
@@ -248,7 +278,8 @@ static void emit_cpu_stat(void)
             char key[32];
             unsigned long long u=0,n=0,s=0,id=0,io=0,ir=0,si=0,st=0;
             if (sscanf(line, "%31s %llu %llu %llu %llu %llu %llu %llu %llu",
-                       key, &u,&n,&s,&id,&io,&ir,&si,&st) >= 5) {
+                       key, &u,&n,&s,&id,&io,&ir,&si,&st) >= 5
+                && cpustat_key_ok(key) && !cpustat_has(body, key)) {
                 if (!cpustat_append(body, CPUSTAT_MAX, &len, first, key, u,n,s,id,io,ir,si,st)) {
                     truncated = 1;
                     break;
@@ -503,11 +534,14 @@ static int mount_is_dup(const struct mnt *arr, int n, const struct mnt *e)
    filesystem and storage entries. Returns the count of kept records.
 
    `seen`, `overlong`, `dups_dropped` and `truncated` (all optional) report what the
-   bound did, so a short list is never mistaken for a complete one. */
+   bound did, so a short list is never mistaken for a complete one. `readable` (also
+   optional) is 0 when the file could not be read or the table could not be
+   allocated, so "no mounts" is never mistaken for "could not look". */
 static int parse_mounts(struct mnt **out, int *dups_dropped, int *seen,
-                        int *overlong, int *truncated)
+                        int *overlong, int *truncated, int *readable)
 {
     *out = NULL;
+    if (readable) *readable = 0;
     if (dups_dropped) *dups_dropped = 0;
     if (seen) *seen = 0;
     if (overlong) *overlong = 0;
@@ -518,6 +552,7 @@ static int parse_mounts(struct mnt **out, int *dups_dropped, int *seen,
     if (itrunc && truncated) *truncated = 1;
     int cap = 32, n = 0;
     struct mnt *m = malloc(sizeof(*m) * cap);
+    if (m && readable) *readable = 1;
     char *save, *line = strtok_r(buf, "\n", &save);
     while (line && m) {
         struct mnt e;
@@ -741,8 +776,9 @@ int main(int argc, char **argv)
     json_escape(un.machine, emach, sizeof(emach));
 
     struct mnt *mnts = NULL;
-    int dups = 0, mnts_seen = 0, mnts_overlong = 0, mnts_truncated = 0;
-    int nmnts = parse_mounts(&mnts, &dups, &mnts_seen, &mnts_overlong, &mnts_truncated);
+    int dups = 0, mnts_seen = 0, mnts_overlong = 0, mnts_truncated = 0, mnts_readable = 0;
+    int nmnts = parse_mounts(&mnts, &dups, &mnts_seen, &mnts_overlong, &mnts_truncated,
+                             &mnts_readable);
 
     /* boot identity: /proc/stat's `btime` is the EXPLICIT instant the kernel booted.
        Comparing it between two samples detects a reboot without relying on uptime
@@ -766,14 +802,6 @@ int main(int argc, char **argv)
     printf(",\"boot_time\":");
     if (have_bt) printf("%lld", btime); else printf("null");
     printf("},%s", nl);
-
-    /* Explicit reporting of every hard bound, so a shorter-than-expected document is
-       distinguishable from a complete one rather than being silently trusted. */
-    printf("\"limits\":{\"file_read_max_bytes\":%u,\"files_truncated\":%d,"
-           "\"mounts_max\":%d,\"mounts_seen\":%d,\"mounts_overlong\":%d,"
-           "\"mounts_truncated\":%s},%s",
-           (unsigned)SLURP_MAX, g_files_truncated, STATVFS_MAX_ENTRIES, mnts_seen,
-           mnts_overlong, mnts_truncated ? "true" : "false", nl);
 
     fputs(sp, stdout); emit_cpuinfo();   printf(",%s", nl);
     fputs(sp, stdout); emit_loadavg();   printf(",%s", nl);
@@ -820,7 +848,17 @@ int main(int argc, char **argv)
     printf("%s\"duplicate_records_dropped\":%d,%s", sp, dups, nl);
     printf("%s\"note\":\"candidates are block-device-backed mounts; block-backed does not establish USB identity\"%s",
            sp, nl);
-    printf("}%s", nl);
+    printf("},%s", nl);
+
+    /* Explicit reporting of every hard bound, so a shorter-than-expected document is
+       distinguishable from a complete one rather than being silently trusted. Printed
+       last: every /proc file has been read by now, so files_truncated is final. */
+    printf("\"limits\":{\"file_read_max_bytes\":%u,\"files_truncated\":%d,"
+           "\"mounts_max\":%d,\"mounts_readable\":%s,\"mounts_seen\":%d,"
+           "\"mounts_overlong\":%d,\"mounts_truncated\":%s}%s",
+           (unsigned)SLURP_MAX, g_files_truncated, STATVFS_MAX_ENTRIES,
+           mnts_readable ? "true" : "false", mnts_seen,
+           mnts_overlong, mnts_truncated ? "true" : "false", nl);
 
     printf("}%s", nl);
 
