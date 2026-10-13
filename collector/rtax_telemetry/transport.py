@@ -802,6 +802,9 @@ class SSHTransport:
         if not os.path.isfile(self.known_hosts):
             raise ArtifactMismatch("pinned known_hosts not found: %s" % self.known_hosts)
         k = sha256_file(self.known_hosts)
+        if not self.known_hosts_sha:
+            self.log("WARNING: known_hosts_sha is not configured - the pinned known_hosts "
+                     "file is NOT hash-checked (sha256 %s)" % k)
         if self.known_hosts_sha and k != self.known_hosts_sha:
             raise ArtifactMismatch(
                 "pinned known_hosts hash mismatch (%s != %s) - refusing"
@@ -1039,11 +1042,18 @@ class SSHTransport:
                      "transport (PubkeyAuthentication=no), so an installed key alone "
                      "would not enable unattended use - that needs its own implementation "
                      "change, not just a key in authorized_keys.")
-        rc, _out, err = run_bounded(argv, self.connect_timeout + 20,
-                                    interactive=interactive, log=self.log,
-                                    env=_child_env(),
-                                    max_stdout=self.max_stdout_bytes,
-                                    max_stderr=self.max_stderr_bytes)
+        try:
+            rc, _out, err = run_bounded(argv, self.connect_timeout + 20,
+                                        interactive=interactive, log=self.log,
+                                        env=_child_env(),
+                                        max_stdout=self.max_stdout_bytes,
+                                        max_stderr=self.max_stderr_bytes)
+        except RemoteTimeout as e:
+            # `timeout` means a reporter run ended. Nothing has run yet: a stalled
+            # connection or an unanswered prompt here is a provisioning failure.
+            raise ProvisioningError(
+                "ssh master establishment exceeded its %ss deadline (the reporter "
+                "never ran): %s" % (self.connect_timeout + 20, sanitize_detail(e))) from e
         if rc != 0:
             if rc == -signal.SIGINT:
                 # Ctrl-C at the password prompt kills ssh itself. The operator

@@ -28,7 +28,7 @@ from .core import (
     default_state,
     is_hard_stop,
 )
-from .errors import LockHeld, TelemetryError, TransportError
+from .errors import LockHeld, TelemetryError, TransportError, sanitize_detail
 from .mock import ScenarioTransport, SCENARIOS
 from .status import render_status, sample_age_seconds
 from .store import (
@@ -310,6 +310,13 @@ def cmd_collect(args):
         log("FATAL: retention limits must be whole numbers of at least 1 during "
             "collection (%s); use `prune` to purge" % ", ".join(bad))
         return EXIT_BAD_OPTION
+    if args.transport == "ssh":
+        kh_sha = cfg_get(args, cfg, "known_hosts_sha", EXPECT_KNOWN_HOSTS_SHA)
+        if kh_sha is None or kh_sha == "":
+            log("FATAL: known_hosts_sha is not configured, so the pinned known_hosts "
+                "file would not be hash-checked. Set it to the file's SHA-256, or to "
+                "false to run without the check (a warning is logged on every run)")
+            return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     try:
         store.ensure()
@@ -524,8 +531,9 @@ def cmd_validate(args):
     except TelemetryError as e:
         log("INVALID: %s" % e)
         return 1
-    print("VALID router_health document: schema=%s tool=%s version=%s" % (
-        doc.get("schema"), doc.get("tool"), doc.get("version")))
+    # The document is device-authored: its strings go through the sanitiser too.
+    print("VALID router_health document: schema=%s tool=%s version=%s" % tuple(
+        sanitize_detail(doc.get(k)) for k in ("schema", "tool", "version")))
     return 0
 
 
