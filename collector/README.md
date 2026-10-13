@@ -97,7 +97,7 @@ Evidence files are created `0600` and their directories `0700` regardless of the
 
 ## Validation boundary
 
-**Collector 1.5.5 and reporter 1.0.5, the versions in this tree, are not hardware-accepted.** They were tested offline only (mock transport, fake SSH, synthetic `/proc` fixtures); no ARM artifact has been built from the 1.0.5 reporter source, and the private bench copy remains 1.5.4. Everything below describes the versions it names.
+**Collector 1.5.5 and reporter 1.0.5, the versions in this tree, are not hardware-accepted.** They were tested offline only (mock transport, fake SSH, synthetic `/proc` fixtures); the ARM artifact is now built and QEMU-tested, and the private bench copy is synchronized to 1.5.5. See the [integration record](../docs/integration-20261014.md). Everything below describes the versions it names.
 
 The latest bench milestone is **collector 1.5.4 / reporter 1.0.4**: a supervised
 Ethernet cable-loss/recovery trial recorded 16 attempts, 10 successes and six expected

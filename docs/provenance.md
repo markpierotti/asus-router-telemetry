@@ -3,9 +3,9 @@
 Project lead: Mark Pierotti.
 
 The current source versions are reporter **1.0.5** and collector **1.5.5**. Both are
-offline-tested only: **neither is hardware-accepted**, no ARM artifact has been built
-from the 1.0.5 source, and the changes have not been applied to the private bench
-copy, which remains at collector 1.5.4. The last hardware-accepted pair is reporter
+offline-tested only: **neither is hardware-accepted**. The ARM artifact has been built and QEMU-tested,
+and the private bench is synchronized to collector 1.5.5; see the
+[integration record](integration-20261014.md). The last hardware-accepted pair is reporter
 **1.0.4** with collector **1.5.4**.
 
 The collector is a portable adaptation: private paths, username, address and host-key

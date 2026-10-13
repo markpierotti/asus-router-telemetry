@@ -1,17 +1,17 @@
 # Validation record
 
-Updated: 2026-10-13. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
+Updated: 2026-10-14. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
 
 ## Unaccepted source revision: reporter 1.0.5 / collector 1.5.5 (offline only)
 
 The source in this tree is reporter **1.0.5** and collector **1.5.5**: corrections from
 an independent audit of 1.0.4 / 1.5.4 and two review rounds of those corrections.
-**Neither version is hardware-accepted.** No device request was made for this work. No
-ARM artifact has been built from the 1.0.5 source, so the artifact digests below still
-describe 1.0.4 and none of the 1.0.5 reporter changes exist in any ARM binary. The
-changes have not been applied to the private bench copy, and the
-[import manifest](import-manifest.json) has not been regenerated: it describes the
-1.5.4 import and its portable hashes no longer match the collector files changed here.
+**Neither version is hardware-accepted.** No device request was made for this work. The 1.0.5 ARM artifact is now built and QEMU-tested, and the private bench copy
+is synchronized to collector 1.5.5. The [import manifest](import-manifest.json)
+has been regenerated from both source trees and the new artifact. See the
+[integration record](integration-20261014.md) for the exact identities.
+The historical artifact digests below still describe 1.0.4; they are not
+acceptance evidence for the new artifact.
 
 Reporter source v1.0.5:
 
