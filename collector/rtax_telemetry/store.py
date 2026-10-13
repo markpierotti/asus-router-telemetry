@@ -234,7 +234,7 @@ class Store:
                 % (len(payload), self.max_sample_bytes))
         path = self.samples_dir / (utc_stamp(ts) + ".json")
         self._atomic_write(path, payload)
-        self.prune_samples()
+        self.prune_samples(newest=path)
         return path
 
     def last_sample(self):
@@ -429,9 +429,30 @@ class Store:
         self._atomic_write(self.state_path, payload)
 
     # ------------------------------------------------------------- retention
-    def prune_samples(self):
-        """Trim oldest samples until BOTH the record count and byte budget hold."""
+    def _prune_order(self, newest=None):
+        """Sample paths in the order retention removes them.
+
+        Sample names are wall-clock stamps, so name order is age order only while
+        the clock moves forward. ``newest`` is the sample ``save_sample`` has just
+        written: whatever its name says, every other sample is older. Samples named
+        LATER than it were therefore written before the clock stepped back; they go
+        first, then the samples named earlier, and ``newest`` itself last. With a
+        forward clock nothing is named later, and this is plain name order.
+
+        After a backward step SMALLER than the span of retained samples the names
+        interleave and the order among the older samples is approximate. The sample
+        just written is still the last candidate, which is what stops a successful
+        attempt from deleting its own evidence.
+        """
         paths = self.sample_paths()
+        if newest is None or newest not in paths:
+            return paths
+        return ([p for p in paths if p.name > newest.name]
+                + [p for p in paths if p.name < newest.name] + [newest])
+
+    def prune_samples(self, newest=None):
+        """Trim oldest samples until BOTH the record count and byte budget hold."""
+        paths = self._prune_order(newest)
         removed = 0
         excess = len(paths) - self.retain_samples
         for p in paths[:max(0, excess)]:
@@ -440,7 +461,7 @@ class Store:
                 removed += 1
             except OSError:
                 pass
-        paths = self.sample_paths()
+        paths = [p for p in paths if p.exists()]
         total = sum(_size(p) for p in paths)
         i = 0
         while total > self.retain_sample_bytes and i < len(paths):

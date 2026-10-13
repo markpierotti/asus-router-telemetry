@@ -142,7 +142,18 @@ def restore_stop_handlers(installed):
 
 
 # --------------------------------------------------------------------- config
-def load_config(data_dir):
+class ConfigUnreadable(Exception):
+    """config.json exists but could not be read as a JSON object."""
+
+
+def load_config(data_dir, strict=False):
+    """The operator's config.json, or {} when there is none.
+
+    ``strict`` is for the commands that DELETE under the configured retention
+    limits (collect, prune): a file that exists but cannot be read raises
+    ConfigUnreadable there, because falling back to the defaults would prune
+    evidence the configured limits keep. Read-only commands warn and use defaults.
+    """
     path = os.path.join(os.path.expanduser(str(data_dir or DEFAULT_DATA_DIR)), "config.json")
     if not os.path.isfile(path):
         return {}
@@ -153,6 +164,8 @@ def load_config(data_dir):
             raise ValueError("config.json must be an object")
         return cfg
     except (OSError, ValueError) as e:
+        if strict:
+            raise ConfigUnreadable("unreadable config.json (%s)" % e)
         log("WARNING: ignoring unreadable config.json (%s)" % e)
         return {}
 
@@ -255,6 +268,25 @@ def build_store(args, cfg):
     )
 
 
+RETENTION_OPTIONS = ("retain_samples", "retain_outcomes",
+                     "retain_sample_bytes", "retain_outcome_bytes")
+
+
+def retention_below_one(args, cfg):
+    """Names of retention limits that are set, by flag or config, below 1.
+
+    Collection prunes after every write, so such a limit deletes the sample or the
+    outcome record the attempt has just produced. `prune` is the explicit purge and
+    does not apply this check.
+    """
+    bad = []
+    for name in RETENTION_OPTIONS:
+        v = cfg_get(args, cfg, name, None)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 1):
+            bad.append("%s=%r" % (name, v))
+    return bad
+
+
 def build_collector(args, cfg, transport, store, host_label):
     return Collector(
         transport, store,
@@ -268,7 +300,16 @@ def build_collector(args, cfg, transport, store, host_label):
 
 # ---------------------------------------------------------------------- commands
 def cmd_collect(args):
-    cfg = load_config(args.data_dir)
+    try:
+        cfg = load_config(args.data_dir, strict=True)
+    except ConfigUnreadable as e:
+        log("FATAL: %s; not collecting with default limits" % e)
+        return EXIT_BAD_OPTION
+    bad = retention_below_one(args, cfg)
+    if bad:
+        log("FATAL: retention limits must be whole numbers of at least 1 during "
+            "collection (%s); use `prune` to purge" % ", ".join(bad))
+        return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     try:
         store.ensure()
@@ -447,7 +488,11 @@ def cmd_status(args):
 
 
 def cmd_prune(args):
-    cfg = load_config(args.data_dir)
+    try:
+        cfg = load_config(args.data_dir, strict=True)
+    except ConfigUnreadable as e:
+        log("FATAL: %s; not pruning with default limits" % e)
+        return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     # prune REWRITES the outcomes log and unlinks samples: it must take the SAME
     # data-directory lock as collection, so it cannot race a live collector.
