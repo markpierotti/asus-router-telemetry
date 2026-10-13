@@ -158,6 +158,10 @@ CONFIG_KEYS = frozenset((
     "retain_sample_bytes", "retain_outcome_bytes", "max_sample_bytes",
     "open_after", "resolve_after", "interval",
 ))
+# The one key that sets nothing: config.example.json carries an operator note under
+# it, and a configuration copied from the example keeps it. It is accepted, never
+# read, and excuses no other key.
+CONFIG_METADATA_KEYS = frozenset(("_comment",))
 
 
 def _no_repeated_keys(pairs):
@@ -179,7 +183,8 @@ def load_config(data_dir, strict=False):
 
     "Exists" is asked with lexists: a dangling symlink or a directory named
     config.json is a configuration that did not load, not an absent one. So is a
-    file with a repeated key or a key the collector does not know.
+    file with a repeated key or a key the collector does not know (``_comment``,
+    which the distributed example carries, is the one key allowed to set nothing).
     """
     path = os.path.join(os.path.expanduser(str(data_dir or DEFAULT_DATA_DIR)), "config.json")
     if not os.path.lexists(path):
@@ -196,7 +201,8 @@ def load_config(data_dir, strict=False):
             raise ConfigUnreadable("unreadable config.json (%s)" % e)
         log("WARNING: ignoring unreadable config.json (%s)" % e)
         return {}
-    unknown = sorted(k for k in cfg if k not in CONFIG_KEYS)
+    unknown = sorted(k for k in cfg
+                     if k not in CONFIG_KEYS and k not in CONFIG_METADATA_KEYS)
     if unknown:
         names = ", ".join(sanitize_detail(k) for k in unknown)
         if strict:

@@ -512,11 +512,28 @@ class Store:
         self._atomic_write(self.outcomes_path, "".join(keep).encode("utf-8"))
         return i
 
+    def _own_sample(self, located):
+        """This store's entry for the file at ``located``, or None.
+
+        State records the sample by the spelling of the data directory in use when
+        it was written; the same directory reached through a symlink spells every
+        path differently. The match is therefore by file identity, against the
+        entry of the same name in THIS store's samples directory - so a same-named
+        file anywhere else is not this store's sample, and nothing outside the
+        store is ever returned.
+        """
+        if not located:
+            return None
+        own = self.samples_dir / os.path.basename(located)
+        try:
+            return own if os.path.samefile(own, located) else None
+        except OSError:
+            return None
+
     def prune(self):
         """Standalone retention. The last accepted sample that state names is the
         newest whatever its file name says, so it is the last sample to go."""
-        located = self._state_sample_path()
-        newest = Path(located) if located else None
+        newest = self._own_sample(self._state_sample_path())
         return self.prune_samples(newest=newest) + self.prune_outcomes()
 
 
