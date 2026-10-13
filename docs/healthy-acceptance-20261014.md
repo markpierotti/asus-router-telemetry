@@ -34,10 +34,11 @@ bench data files were byte-identical after the trial.
 
 ## Limits
 
-This establishes **supervised healthy-path acceptance only**. Dropout/reconnection,
-real cleanup-failure paths, longer runs, unattended authentication, reboot persistence
-and USB/NAS/AP operation are unproven for these versions. The earlier dropout trial
-belongs to collector 1.5.4 / reporter 1.0.4. Nothing is installed persistently or scheduled.
+This record establishes **supervised healthy-path acceptance only**. A later, separate
+[Ethernet dropout/recovery trial](dropout-recovery-20261014.md) passed on the same versions
+and includes manual cleanup. Longer runs, unattended authentication, reboot persistence
+and USB/NAS/AP operation remain unproven. Older trials retain their own version identities.
+Nothing is installed persistently or scheduled.
 
 An unset router wall clock means boot_time is a boot identity, not an accurate civil
 timestamp. Attempt-start timestamps include provisioning; CPU percentages derive

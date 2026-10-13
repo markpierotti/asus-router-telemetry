@@ -4,7 +4,7 @@
 
 A C reporter and Python collector developed through firmware analysis, cross-compilation, adversarial testing and validation on a physical ASUS RT-AX56U. The reporter emits Linux system measurements as JSON; the external collector verifies execution, saves history and calculates CPU utilisation. Healthy collection makes zero model calls.
 
-The latest supervised trial recorded **16 attempts: 10 successful samples and six expected link-loss failures**. The collector opened and resolved an incident at the configured thresholds, preserved uncertain cleanup through recovery, and stopped cleanly. Read the [project case study](docs/case-study.md) or the [dropout/recovery evidence](docs/dropout-recovery.md).
+The latest supervised trial on collector **1.5.5** / reporter **1.0.5** recorded **18 attempts: 12 successful samples and six expected link-loss failures**. The incident opened after three failures and resolved after two successes; one stranded owned directory was removed and independently checked absent in a fresh SSH session. Read the [project case study](docs/case-study.md) or the [current dropout/recovery evidence](docs/dropout-recovery-20261014.md).
 
 ## Demonstrated on hardware
 
@@ -21,9 +21,10 @@ The latest supervised trial recorded **16 attempts: 10 successful samples and si
 | Third review remediation (offline) | Nine further findings (F1–F9) addressed: parser containment and bounded/sanitised diagnostics, the reporter-to-collector null contract, control-master liveness gating with no interactive fallback, recorded ownership/cleanup uncertainty, signal-driven teardown, explicit boot identity, and reporter output/format fixes — 73 new regressions |
 | Follow-up review remediation (offline) | Four reproduced defects (R1–R4): provisioning cleanup facts preserved for every error class, cancellation-safe teardown with an independently-released lock, an honest master-shutdown verdict with **no PID signalling**, and a corrected acceptance preservation check — 15 new regressions that fail on the previous revision |
 | Supervised Ethernet dropout/recovery, collector 1.5.4 / reporter 1.0.4 | 16 attempts; incident opened after three failures, resolved after two successes; exit 130 on Ctrl-C, post-stop exit 0; stranded directory reconciled separately |
+| Current healthy-path and Ethernet dropout/recovery, collector 1.5.5 / reporter 1.0.5 | Separate 14-success healthy-path trial, then 18-attempt dropout trial (12 successes/six unreachable); incident thresholds, CPU deltas, restart and manual cleanup independently verified |
 | Multi-hour operation / unattended auth / AP / USB NAS / other failure modes | Not yet validated |
 
-The [archived Hermes prompt](docs/next-phase-prompt.md) framed an earlier foreground trial. The [collector hardware record](docs/collector-hardware-test.md) separates historical results from the latest 1.5.4 milestone.
+The [archived Hermes prompt](docs/next-phase-prompt.md) framed an earlier foreground trial. The [collector hardware record](docs/collector-hardware-test.md) preserves historical results; the [current 1.5.5 trial](docs/dropout-recovery-20261014.md) is recorded separately.
 
 See [reporter hardware tests](docs/hardware-test.md), [collector hardware tests](docs/collector-hardware-test.md) and [validation](docs/validation.md). This is custom userspace software, not a custom firmware image or a deployed SOC.
 
@@ -51,7 +52,7 @@ Requires Docker with linux/amd64 support. The base image is pinned by digest, bu
 ## Components
 
 - `src/router_health.c`: reporter v1.0.5, schema `router_health/2`; host/boot identity, CPU counters, load, memory, filesystem capacity, storage candidates and bounded-input reporting. The exact ARM artifact passed [supervised healthy-path acceptance](docs/healthy-acceptance-20261014.md). Missing metrics are null; a failed stdout write exits non-zero.
-- `collector/`: foreground Python collector v1.5.5 with bounded SSH, pinned identity/artifact gates, ownership-aware cleanup, local evidence, derived CPU and incidents. The private bench adaptation passed 14 supervised healthy-path collections, including an 11-sample loop, clean interruption and post-stop restart. Portable configuration remains offline-tested; dropout/recovery on this revision is still unproven.
+- `collector/`: foreground Python collector v1.5.5 with bounded SSH, pinned identity/artifact gates, ownership-aware cleanup, local evidence, derived CPU and incidents. The private bench adaptation passed 14 supervised healthy-path collections, including an 11-sample loop, clean interruption and post-stop restart. Portable configuration remains offline-tested; the same bench adaptation also passed the [supervised dropout/recovery trial](docs/dropout-recovery-20261014.md).
 - `tests/`: embedded-test runner, JSON smoke check, synthetic `/proc` fixtures and reporter edge tests.
 - `docs/`: design, validation, hardware milestones and AI-assisted provenance.
 

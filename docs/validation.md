@@ -6,7 +6,7 @@ Updated: 2026-10-14. Remediation sections retain their historical test boundarie
 
 The source in this tree is reporter **1.0.5** and collector **1.5.5**: corrections from
 an independent audit of 1.0.4 / 1.5.4 and two review rounds of those corrections.
-**The exact ARM artifact and private bench adaptation passed supervised healthy-path acceptance on 2026-10-14.** See the [acceptance record](healthy-acceptance-20261014.md): 14 successes, independently reproduced CPU deltas, clean loop interruption and post-stop restart. Dropout/recovery and unattended operation on this revision remain unproven. The earlier integration was offline-only; the 1.0.5 ARM artifact is built and QEMU-tested, and the private bench copy
+**The exact ARM artifact and private bench adaptation passed supervised healthy-path acceptance on 2026-10-14.** See the [acceptance record](healthy-acceptance-20261014.md): 14 successes, independently reproduced CPU deltas, clean loop interruption and post-stop restart. A subsequent [supervised Ethernet dropout/recovery trial](dropout-recovery-20261014.md) passed for the same pair: 18 attempts, 12 successes, six unreachable outcomes, correct incident thresholds and reconciled cleanup. Unattended operation remains unproven. The earlier integration was offline-only; the 1.0.5 ARM artifact is built and QEMU-tested, and the private bench copy
 is synchronized to collector 1.5.5. The [import manifest](import-manifest.json)
 has been regenerated from both source trees and the new artifact. See the
 [integration record](integration-20261014.md) for the exact identities.
@@ -325,7 +325,7 @@ recalculated 1.62% utilisation. Collector 1.4.0 / reporter 1.0.3 produced 17 acc
 samples across two one-shots, a 14-sample foreground loop and a post-stop one-shot.
 Collector 1.5.2 / reporter 1.0.4 later completed healthy-path acceptance.
 
-The latest [dropout/recovery record](dropout-recovery.md), collector **1.5.4** / reporter
+The preceding [dropout/recovery record](dropout-recovery.md), collector **1.5.4** / reporter
 **1.0.4**, contains 16 attempts, 10 successes and six expected unreachable outcomes.
 Incident thresholds, nine CPU counter comparisons, exit-130 shutdown, exit-0 post-stop
 collection and manual reconciliation of one stranded owned directory were verified.
@@ -351,8 +351,8 @@ Executed for the portable repository update:
 - Unconfigured live collection refused before invoking SSH. Shell syntax and import-manifest hashes were checked; no private target defaults or raw collection history were packaged.
 - For collector 1.5.4 the collector suite was run once, serially, in each tree: **292 tests (291 passed, one skipped)** on Python 3.14.7 for this copy and on Python 3.13.1 for the bench copy. The skipped test needs the *test process itself* to have a controlling terminal, which the runner used did not provide; the controlling-PTY input tests create their own and passed.
 
-No device requests were made during this documentation closeout. The latest private
-bench hardware milestone is collector 1.5.4 / reporter 1.0.4. Collector 1.5.3 remains
+No device requests were made during that 2026-10-13 documentation closeout. Its private
+bench hardware milestone was collector 1.5.4 / reporter 1.0.4. Collector 1.5.3 remains
 an offline intermediate revision; the portable configuration is not separately
 hardware-accepted. No code changed for this closeout, so completed offline suites
 were not rerun. New documentation links, curated JSON, privacy boundaries and

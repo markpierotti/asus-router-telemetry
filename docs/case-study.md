@@ -5,6 +5,8 @@ target for custom ARM telemetry, then tested what happened when its management
 connection disappeared.** The result is a C reporter, a bounded Python SSH collector
 and a hardware-backed record of collection, incident detection, recovery and cleanup.
 
+**Current milestone (2026-10-14):** collector 1.5.5 / reporter 1.0.5 passed separate healthy-path and Ethernet dropout/recovery acceptance. The latest dropout trial recorded 18 attempts, 12 successes and six expected failures, with threshold transitions, CPU deltas and manual cleanup verified. [Current evidence](dropout-recovery-20261014.md); earlier results below keep their original scope.
+
 ## The engineering problem
 
 A successful decompilation or one valid JSON response was not enough. The software

@@ -5,8 +5,10 @@ Project lead: Mark Pierotti.
 The current source versions are reporter **1.0.5** and collector **1.5.5**. The exact
 ARM artifact and private bench adaptation passed [supervised healthy-path acceptance](healthy-acceptance-20261014.md)
 on 2026-10-14: 14 successful samples, including a foreground loop and post-stop restart.
-Portable configuration is offline-tested. Dropout/recovery acceptance remains with
-reporter **1.0.4** / collector **1.5.4**; it is not inherited by the new revision.
+Portable configuration is offline-tested. The new pair also passed its own
+[supervised Ethernet dropout/recovery trial](dropout-recovery-20261014.md): 18 attempts,
+12 successes and six expected unreachable outcomes, with manual cleanup separately
+verified. Older 1.0.4 / 1.5.4 evidence remains attached to its original versions.
 See the [integration record](integration-20261014.md) for build and source identities.
 
 The collector is a portable adaptation: private paths, username, address and host-key
@@ -16,7 +18,7 @@ the private bench and portable copies, with those deliberate configuration diffe
 preserved.
 
 Hardware results belong to the exact bench versions/artifacts named in each record.
-The latest is supervised healthy-path acceptance; the earlier Ethernet dropout/recovery trial belongs to its recorded older versions. Neither is an unattended deployment.
+The latest pair has supervised healthy-path and one host-side Ethernet dropout/recovery acceptance. Earlier trials belong to their recorded older versions. None is an unattended deployment.
 The portable copy was checked offline; it was not separately run against the device.
 
 [Import manifest](import-manifest.json) records the original and adapted code-file hashes. Test fixtures derive from reporter output and contain no device hostname, address, login, host key or credential. Synthetic credentials and documentation addresses in tests are examples, not live access material.

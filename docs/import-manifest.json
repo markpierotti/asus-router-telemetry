@@ -1,12 +1,12 @@
 {
   "date": "2026-10-14",
-  "note": "Reviewed audit remediations integrated from 036d338. Collector 1.5.5 synchronized to the bench with only documented private defaults. Reporter 1.0.5 built once using build-arm.sh, self-tested and fixture-tested under QEMU. No new hardware acceptance or device request; historical source, artifact and evidence retained. This manifest hashes source files, not raw private evidence. Subsequent supervised healthy-path hardware acceptance passed on 2026-10-14; see last_hardware_accepted. Dropout/recovery remains with the earlier pair.",
+  "note": "Reviewed audit remediations integrated from 036d338. Collector 1.5.5 synchronized to the bench with only documented private defaults. Reporter 1.0.5 built once using build-arm.sh, self-tested and fixture-tested under QEMU. No new hardware acceptance or device request; historical source, artifact and evidence retained. This manifest hashes source files, not raw private evidence. Subsequent supervised healthy-path hardware acceptance passed on 2026-10-14; see last_hardware_accepted. Dropout/recovery remains with the earlier pair. Subsequent dropout/recovery and manual reconciliation passed 2026-10-14; see current acceptance record. Earlier manifests and evidence are retained.",
   "reporter_source_sha256": "18c2fdfa7466ceb6cdf18b4d07cffd83f0b56d1b8a583118fc9ffd17c6d65907",
   "reporter_version": "1.0.5",
   "collector_version": "1.5.5",
   "bench_collector_version": "1.5.5",
   "arm_artifact_sha256": "a1cb7d1f1787c2893bacd7fa1233727da01cca8944fc8d47064708c8c8d6d0c3",
-  "arm_artifact_note": "Reporter 1.0.5 exact artifact passed offline/QEMU and supervised healthy-path acceptance with collector 1.5.5 (14 accepted samples). Dropout/recovery on this revision is unproven; the older accepted artifact is preserved.",
+  "arm_artifact_note": "Reporter 1.0.5 exact artifact passed offline/QEMU, 14-sample healthy-path acceptance and a separate 18-attempt host-side Ethernet dropout/recovery trial with collector 1.5.5. One stranded directory manually reconciled and separately checked absent. Unattended/long-run/reboot acceptance remains unproven.",
   "reads_no_private_state": true,
   "adaptations": [
     "explicit operator configuration",
@@ -171,13 +171,28 @@
     "collector_version": "1.5.5",
     "reporter_version": "1.0.5",
     "arm_artifact_sha256": "a1cb7d1f1787c2893bacd7fa1233727da01cca8944fc8d47064708c8c8d6d0c3",
-    "scope": "supervised healthy-path only",
+    "scope": "supervised healthy-path plus one host-side Ethernet dropout/recovery with manual reconciliation",
     "date": "2026-10-14",
-    "samples": 14,
-    "record": "healthy-acceptance-20261014.md"
+    "healthy_path_samples": 14,
+    "dropout_attempts": 18,
+    "dropout_successes": 12,
+    "dropout_unreachable": 6,
+    "record": "dropout-recovery-20261014.md"
   },
   "collector_test_fixture_commit": "1e19e71a3b46f3055219af561334f5e079c86589",
   "last_dropout_accepted": {
+    "collector_version": "1.5.5",
+    "reporter_version": "1.0.5",
+    "arm_artifact_sha256": "a1cb7d1f1787c2893bacd7fa1233727da01cca8944fc8d47064708c8c8d6d0c3",
+    "scope": "supervised healthy-path plus one host-side Ethernet dropout/recovery with manual reconciliation",
+    "date": "2026-10-14",
+    "healthy_path_samples": 14,
+    "dropout_attempts": 18,
+    "dropout_successes": 12,
+    "dropout_unreachable": 6,
+    "record": "dropout-recovery-20261014.md"
+  },
+  "previous_dropout_accepted": {
     "collector_version": "1.5.4",
     "reporter_version": "1.0.4",
     "arm_artifact_sha256": "17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36",

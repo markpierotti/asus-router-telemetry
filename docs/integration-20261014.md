@@ -52,3 +52,7 @@ private-suite log is retained in the private integration evidence. The private f
 suite is rerun after this correction. The production source/build identity is unchanged.
 
 Test-only commit: `1e19e71a3b46f3055219af561334f5e079c86589`.
+
+## Subsequent dropout acceptance
+
+The same pair passed a separate [supervised host-side Ethernet dropout/recovery trial](dropout-recovery-20261014.md), including exact-path manual cleanup and a fresh SSH absence check. This supersedes the integration-time pending dropout step without changing the recorded build identity.

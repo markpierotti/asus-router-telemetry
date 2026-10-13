@@ -97,9 +97,9 @@ Evidence files are created `0600` and their directories `0700` regardless of the
 
 ## Validation boundary
 
-**Collector 1.5.5 / reporter 1.0.5 passed supervised healthy-path acceptance on the private bench adaptation:** two one-shots, an 11-sample foreground loop, clean Ctrl-C/exit 130 and a post-stop one-shot/exit 0. All 13 CPU deltas were independently reproduced. See the [acceptance record](../docs/healthy-acceptance-20261014.md) and [integration record](../docs/integration-20261014.md). Portable configuration was checked offline. Dropout/recovery remains unproven for this revision; the historical results below apply only to the versions they name.
+**Collector 1.5.5 / reporter 1.0.5 passed supervised healthy-path acceptance on the private bench adaptation:** two one-shots, an 11-sample foreground loop, clean Ctrl-C/exit 130 and a post-stop one-shot/exit 0. All 13 CPU deltas were independently reproduced. See the [acceptance record](../docs/healthy-acceptance-20261014.md) and [integration record](../docs/integration-20261014.md). Portable configuration was checked offline. The same pair subsequently passed one [supervised Ethernet dropout/recovery trial](../docs/dropout-recovery-20261014.md): 18 attempts, 12 successes, six unreachable outcomes, correct thresholds, clean restart and separately verified manual cleanup. The historical results below apply only to the versions they name.
 
-The last dropout/recovery milestone is **collector 1.5.4 / reporter 1.0.4**: a supervised
+The preceding dropout/recovery milestone is **collector 1.5.4 / reporter 1.0.4**: a supervised
 Ethernet cable-loss/recovery trial recorded 16 attempts, 10 successes and six expected
 `unreachable` outcomes. The incident opened after three failures and resolved after
 two recovery successes. Ctrl-C exited 130; the post-stop one-shot exited zero. One
