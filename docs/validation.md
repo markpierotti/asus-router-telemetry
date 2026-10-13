@@ -2,11 +2,11 @@
 
 Updated: 2026-10-14. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
 
-## Unaccepted source revision: reporter 1.0.5 / collector 1.5.5 (offline only)
+## Current revision: reporter 1.0.5 / collector 1.5.5 (supervised healthy-path accepted)
 
 The source in this tree is reporter **1.0.5** and collector **1.5.5**: corrections from
 an independent audit of 1.0.4 / 1.5.4 and two review rounds of those corrections.
-**Neither version is hardware-accepted.** No device request was made for this work. The 1.0.5 ARM artifact is now built and QEMU-tested, and the private bench copy
+**The exact ARM artifact and private bench adaptation passed supervised healthy-path acceptance on 2026-10-14.** See the [acceptance record](healthy-acceptance-20261014.md): 14 successes, independently reproduced CPU deltas, clean loop interruption and post-stop restart. Dropout/recovery and unattended operation on this revision remain unproven. The earlier integration was offline-only; the 1.0.5 ARM artifact is built and QEMU-tested, and the private bench copy
 is synchronized to collector 1.5.5. The [import manifest](import-manifest.json)
 has been regenerated from both source trees and the new artifact. See the
 [integration record](integration-20261014.md) for the exact identities.
@@ -51,8 +51,9 @@ file-name order.
 
 ## Current identities
 
-The identities in this section are those of the last hardware-accepted pair, reporter
-1.0.4 with collector 1.5.4. They are unchanged by the 1.0.5 / 1.5.5 source revision above.
+The identities in this section are historical: reporter 1.0.4 with collector 1.5.4,
+which passed dropout/recovery. They are unchanged by the new supervised healthy-path
+acceptance; the new artifact identity is in the acceptance record above.
 
 Reporter source v1.0.4 (third remediation revision; identical in the bench project and this repository):
 

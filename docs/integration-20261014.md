@@ -5,7 +5,7 @@ commit `036d3383a04002e81ca2710d076ad04f42c89b72`. The private bench collector i
 synchronized with only the documented private default blocks and example
 configuration differing. The import manifest is regenerated from the files.
 
-**Not hardware-accepted.** The last hardware-accepted pair remains collector
+**At integration time, not hardware-accepted.** Subsequent [supervised healthy-path acceptance](healthy-acceptance-20261014.md) passed for 1.5.5 / 1.0.5. The preceding dropout-accepted pair remains collector
 1.5.4 / reporter 1.0.4, artifact
 `17ade0d2e85ed2880cb6a38de018bcf3f3d76d3f9090eb29eda54c007fe66e36`.
 The old code, artifact and historical evidence are preserved. No router request,

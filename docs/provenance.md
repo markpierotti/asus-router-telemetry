@@ -2,20 +2,21 @@
 
 Project lead: Mark Pierotti.
 
-The current source versions are reporter **1.0.5** and collector **1.5.5**. Both are
-offline-tested only: **neither is hardware-accepted**. The ARM artifact has been built and QEMU-tested,
-and the private bench is synchronized to collector 1.5.5; see the
-[integration record](integration-20261014.md). The last hardware-accepted pair is reporter
-**1.0.4** with collector **1.5.4**.
+The current source versions are reporter **1.0.5** and collector **1.5.5**. The exact
+ARM artifact and private bench adaptation passed [supervised healthy-path acceptance](healthy-acceptance-20261014.md)
+on 2026-10-14: 14 successful samples, including a foreground loop and post-stop restart.
+Portable configuration is offline-tested. Dropout/recovery acceptance remains with
+reporter **1.0.4** / collector **1.5.4**; it is not inherited by the new revision.
+See the [integration record](integration-20261014.md) for build and source identities.
 
 The collector is a portable adaptation: private paths, username, address and host-key
 digest are removed; operator configuration is explicit. Verification remains required
-for normal live use. Up to 1.0.4 / 1.5.4, functionally aligned code was applied to both
+for normal live use. Through 1.0.5 / 1.5.5, functionally aligned production code was applied to both
 the private bench and portable copies, with those deliberate configuration differences
 preserved.
 
 Hardware results belong to the exact bench versions/artifacts named in each record.
-The latest is a supervised Ethernet dropout/recovery trial, not an unattended deployment.
+The latest is supervised healthy-path acceptance; the earlier Ethernet dropout/recovery trial belongs to its recorded older versions. Neither is an unattended deployment.
 The portable copy was checked offline; it was not separately run against the device.
 
 [Import manifest](import-manifest.json) records the original and adapted code-file hashes. Test fixtures derive from reporter output and contain no device hostname, address, login, host key or credential. Synthetic credentials and documentation addresses in tests are examples, not live access material.
