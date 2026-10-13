@@ -2,11 +2,17 @@
 
 Project lead: Mark Pierotti.
 
-The current source versions are reporter **1.0.4** and collector **1.5.4**. The
-collector is a portable adaptation: private paths, username, address and host-key
+The current source versions are reporter **1.0.5** and collector **1.5.5**. Both are
+offline-tested only: **neither is hardware-accepted**, no ARM artifact has been built
+from the 1.0.5 source, and the changes have not been applied to the private bench
+copy, which remains at collector 1.5.4. The last hardware-accepted pair is reporter
+**1.0.4** with collector **1.5.4**.
+
+The collector is a portable adaptation: private paths, username, address and host-key
 digest are removed; operator configuration is explicit. Verification remains required
-for normal live use. Functionally aligned code was applied to both the private bench
-and portable copies, with those deliberate configuration differences preserved.
+for normal live use. Up to 1.0.4 / 1.5.4, functionally aligned code was applied to both
+the private bench and portable copies, with those deliberate configuration differences
+preserved.
 
 Hardware results belong to the exact bench versions/artifacts named in each record.
 The latest is a supervised Ethernet dropout/recovery trial, not an unattended deployment.

@@ -1,6 +1,6 @@
 # Foreground telemetry collector
 
-Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.5.4. Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
+Python standard-library collector adapted from the RT-AX56U bench implementation, version 1.5.5 (offline-tested only; the last hardware-accepted version is 1.5.4, see [Validation boundary](#validation-boundary)). Validates `router_health/2`, derives CPU utilisation from successive counters, retains timestamped samples and outcomes, and tracks collection incidents. Healthy collection makes zero model calls.
 
 Requires macOS or a POSIX host with Python 3.11+ and OpenSSH for live use. It remains a foreground process; it creates no scheduled jobs, services or startup hooks.
 
@@ -24,7 +24,9 @@ Live collection is an explicit operation. No working router address, username, h
 
 Build the ARM reporter from the repository root with `sh build-arm.sh`, review its output and record its SHA-256. Establish the intended router's SSH host-key identity and retain the reviewed keys in a local `known_hosts` file. This project does not establish that trust automatically; `StrictHostKeyChecking=yes` then enforces the file. Record the file's SHA-256 too.
 
-Copy `config.example.json` to a private `<data-dir>/config.json`. Set your host, SSH username, absolute artifact and known-hosts paths, and both recorded hashes. Never store passwords in configuration. A new ARM build may differ from the historical hardware-tested artifact; this configuration does not make it hardware-validated.
+Copy `config.example.json` to a private `<data-dir>/config.json`. Set your host, SSH username, absolute artifact and known-hosts paths, and both recorded hashes. Never store passwords in configuration. The example's `_comment` note may stay: it is the one key that sets nothing. A new ARM build may differ from the historical hardware-tested artifact; this configuration does not make it hardware-validated.
+
+From 1.5.5, `collect` and `prune` exit 2 instead of running with defaults when `config.json` cannot be used as written: it is not valid JSON, is not a regular file (a directory or a dangling symlink), repeats a key, or carries a key the collector does not know, which is how a misspelt option shows up. `_comment` is the only exception. `status` warns and carries on. `known_hosts_sha` is required for SSH collection: 64 lower-case hex digits, the SHA-256 of the pinned `known_hosts` **file**. Exactly `false` runs without that file check and logs a warning on every run; any other value exits 2 before an attempt is made. This digest is separate from host-key verification, which SSH always performs against the pinned file.
 
 ```sh
 python3 collector.py collect --once --data-dir /absolute/path/to/private/data
@@ -49,7 +51,11 @@ Three failed attempts open a collection incident; two successes resolve it. An u
 
 Retention is bounded in two dimensions: `retain_samples` (default 1440) and `retain_outcomes` (default 5000) count records, and `retain_sample_bytes` / `retain_outcome_bytes` cap the bytes kept on disk. A single sample larger than `max_sample_bytes` is refused with a classified `storage_error`, never silently truncated. `status`, `prune`, `validate FILE` and `selftest` are available. `prune` takes the same data-directory lock as collection, so it cannot race a live collector (exit 3 on conflict).
 
-Exit codes: **0** success, **1** collection failure or a hard stop, **2** an invalid option (a non-finite/too-small `--interval`, or one at/above `ControlPersist`), **3** overlap lock, **5** cleanup could not be confirmed after an otherwise successful collection, **6** the evidence could not be written, **130** interrupted (Ctrl-C, `SIGTERM` or `SIGHUP`), including an interrupt that arrives during teardown after an otherwise successful collection. A cleanup failure and a persistence failure are each reported separately and never mask an original collection failure.
+From 1.5.5 the limits are checked before anything is deleted. In `config.json`, each `retain_*` value and `max_sample_bytes` must be a whole number of at least 1; a boolean, string, fraction, null or zero there exits 2 from `collect` and from `prune`. `retain_sample_bytes` may not be below `max_sample_bytes`. Removing everything is explicit and belongs to the command line: `prune --retain-samples 0` (or another `--retain-*` flag set to 0, or a small `--retain-sample-bytes`); a negative flag is refused. A successful attempt never removes the sample or the outcome line it has just written, so one outcome line larger than `retain_outcome_bytes` is kept: that budget bounds the older lines, not the latest.
+
+Sample file names are wall-clock timestamps. When the collector host's clock steps backwards, the sample just written, and for a standalone `prune` the last accepted sample that `state.json` names, is still the last one removed, whichever spelling of the data directory is used (the directory itself or a symlink to it). The order among the *older* samples is then by file name and is approximate. With no usable state pointer (no `state.json`, or a recorded absolute path that no longer exists because the directory was moved or the symlink it was written through is gone) a standalone `prune` falls back to file-name order.
+
+Exit codes: **0** success, **1** collection failure or a hard stop, **2** an invalid option (a non-finite/too-small `--interval`, or one at/above `ControlPersist`; from 1.5.5 also a `config.json` that cannot be used as written, an unusable retention or size limit, or a missing or malformed `known_hosts_sha`), **3** overlap lock, **5** cleanup could not be confirmed after an otherwise successful collection, **6** the evidence could not be written, **130** interrupted (Ctrl-C, `SIGTERM` or `SIGHUP`), including an interrupt that arrives during teardown after an otherwise successful collection. A cleanup failure and a persistence failure are each reported separately and never mask an original collection failure.
 
 ## Containment and outcome classes
 
@@ -61,7 +67,7 @@ Provisioning gates are hard stops: the required-tool probe must exit 0 and retur
 
 Full outcome taxonomy: `success` · `malformed_data` · `schema_invalid` · `timeout` · `reporter_failure` · `provisioning_failure` · `control_master_lost` · `ssh_auth_failure` · `ssh_hostkey_mismatch` · `unreachable` · `artifact_mismatch` · `transport_error` · `output_overflow` · `storage_error` · `internal_error`.
 
-`timeout` means a *reporter run* ended — either the remote watchdog's SIGKILL (`137`) or a local bound. A status of `129`/`130`/`143` (the remote script's own trap, SIGINT, SIGTERM) is a `reporter_failure` with a note that it is **not** proven to be the watchdog timer. A deadline expiry during *provisioning* is a `provisioning_failure` naming its stage, never a reporter timeout. `internal_error` is the final catch-all: a device response or a local fault the taxonomy did not name (a missing `ssh` binary, an unreadable artifact, a serialisation fault) is still recorded and classified rather than crashing.
+`timeout` means a *reporter run* ended — either the remote watchdog's SIGKILL (`137`) or a local bound. A status of `129`/`130`/`143` (the remote script's own trap, SIGINT, SIGTERM) is a `reporter_failure` with a note that it is **not** proven to be the watchdog timer. A deadline expiry during *provisioning* is a `provisioning_failure` naming its stage, never a reporter timeout; from 1.5.5 that includes SSH master establishment exceeding its deadline, which 1.5.4 recorded as `timeout`. `internal_error` is the final catch-all: a device response or a local fault the taxonomy did not name (a missing `ssh` binary, an unreadable artifact, a serialisation fault) is still recorded and classified rather than crashing.
 
 Numeric input is contained too. Numbers are checked against the range each reporter field can actually take (64-bit counters, uptime below 1e12 s, load below 1e9), and the predicates are safe for arbitrary-size JSON integers — a value such as `1e400`-scale integer is rejected as `schema_invalid`, never allowed to raise. A numeric literal whose exponent overflows to a non-finite double (`1e999` → `inf`), even in an unknown/extra field, is rejected at parse as `malformed_data`. Stored samples, outcomes, state and pending-cleanup records are serialised as strict JSON (`allow_nan=False`), so a non-standard `Infinity`/`NaN` token can never be written. A rejected response is a classified failed attempt, and the same collector still accepts the next good response.
 
@@ -90,6 +96,8 @@ The ssh option set is hermetic: `-F /dev/null` ignores `~/.ssh/config`, the syst
 Evidence files are created `0600` and their directories `0700` regardless of the operator's umask; writes are `fsync`ed (file and directory); a torn trailing line in the append-only logs is terminated before the next record is appended; and the lock file is opened `O_NOFOLLOW`, so a symlink placed at the lock path is refused rather than followed and truncated.
 
 ## Validation boundary
+
+**Collector 1.5.5 and reporter 1.0.5, the versions in this tree, are not hardware-accepted.** They were tested offline only (mock transport, fake SSH, synthetic `/proc` fixtures); no ARM artifact has been built from the 1.0.5 reporter source, and the private bench copy remains 1.5.4. Everything below describes the versions it names.
 
 The latest bench milestone is **collector 1.5.4 / reporter 1.0.4**: a supervised
 Ethernet cable-loss/recovery trial recorded 16 attempts, 10 successes and six expected

@@ -2,7 +2,57 @@
 
 Updated: 2026-10-13. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
 
+## Unaccepted source revision: reporter 1.0.5 / collector 1.5.5 (offline only)
+
+The source in this tree is reporter **1.0.5** and collector **1.5.5**: corrections from
+an independent audit of 1.0.4 / 1.5.4 and two review rounds of those corrections.
+**Neither version is hardware-accepted.** No device request was made for this work. No
+ARM artifact has been built from the 1.0.5 source, so the artifact digests below still
+describe 1.0.4 and none of the 1.0.5 reporter changes exist in any ARM binary. The
+changes have not been applied to the private bench copy, and the
+[import manifest](import-manifest.json) has not been regenerated: it describes the
+1.5.4 import and its portable hashes no longer match the collector files changed here.
+
+Reporter source v1.0.5:
+
+```
+18c2fdfa7466ceb6cdf18b4d07cffd83f0b56d1b8a583118fc9ffd17c6d65907
+```
+
+Reporter 1.0.5 keeps the schema name `router_health/2`. `limits` is now the last member
+of the document and gains `limits.mounts_readable`; a consumer may treat the mount
+table as complete only when `mounts_readable` is true and `mounts_truncated` is false
+(a 1.0.4 document has no `mounts_readable`, which means unknown). A `/proc/stat` line
+with a malformed or repeated key is skipped rather than printed, and is not counted.
+`limits.files_truncated` covers every file read and counts partial reads, so it can
+differ from 1.0.4 for the same input. The collector accepts documents from both
+reporter versions but does not itself read `limits`.
+
+Collector 1.5.5 changes what an operator sees in these ways; the
+[collector README](../collector/README.md) states the rules:
+
+- `collect` and `prune` exit 2 on a `config.json` that cannot be used as written
+  (unparseable, not a regular file, a repeated key, an unknown key other than
+  `_comment`), on a retention or size limit in it that is not a whole number of at
+  least 1, and on `retain_sample_bytes` below `max_sample_bytes`. 1.5.4 warned and ran
+  with defaults, or applied the value.
+- SSH collection requires `known_hosts_sha` (64 lower-case hex digits) or exactly
+  `false`. A configuration without it stops collecting until it is set.
+- A successful attempt never prunes the sample or outcome line it has just written, and
+  after a backward clock step the newest accepted sample is the last to be removed.
+- SSH master establishment exceeding its deadline is `provisioning_failure`, not
+  `timeout`. `validate` output is sanitised.
+
+Offline results on macOS (Python 3.14.7), with a logging `ssh` stand-in first on `PATH`
+that recorded no call: **369 collector tests (368 passed, one skipped; the skip needs the test process itself to have a controlling terminal)**. The reporter audit regressions pass on a normal and an
+ASan/UBSan host build. Known limits: removal order among older samples after a backward
+clock step is approximate; a standalone `prune` with no usable state pointer uses
+file-name order.
+
 ## Current identities
+
+The identities in this section are those of the last hardware-accepted pair, reporter
+1.0.4 with collector 1.5.4. They are unchanged by the 1.0.5 / 1.5.5 source revision above.
 
 Reporter source v1.0.4 (third remediation revision; identical in the bench project and this repository):
 
