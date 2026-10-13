@@ -13,7 +13,15 @@ The first round of corrections (R1-R3, C1-C3, C5-C7) was challenged offline at
       `false` does
   C1  standalone `prune` after a backward clock step deleted the sample state names
 
-Tests whose docstring starts with REGRESSION fail on `59774d1` and must pass after
+The independent review of those corrections at `42363ab` reproduced two more:
+
+  P1  the unknown-key refusal rejected `_comment`, which the distributed
+      `config.example.json` carries, so the documented copy-and-edit start failed
+  P2  standalone `prune` reached through another spelling of the data directory (a
+      symlink) no longer recognised the sample state names, and deleted it
+
+Tests whose docstring starts with REGRESSION fail on `59774d1` (P1 and P2: on
+`42363ab`) and must pass after
 the correction. Tests whose docstring starts with GUARD pass on both: they pin what
 the correction must NOT change (the explicit command-line purge, valid
 configuration, the `false` opt-out, ordinary retention).
@@ -371,6 +379,150 @@ class TestStandalonePruneKeepsTheSampleStateNames(TempCase):
         self.collected(step_back=True)
         Store(self.data, retain_samples=0, log=quiet).prune()
         self.assertEqual(self.samples(), [])
+
+
+# ============================== P1: the distributed example configuration loads
+class TestTheDistributedExampleConfigIsAccepted(CliCase):
+    def example(self):
+        """config.example.json as shipped, with the two digests an operator must record."""
+        with open(os.path.join(ROOT, "config.example.json")) as fh:
+            cfg = json.load(fh)
+        self.assertIn("_comment", cfg, "the example no longer carries _comment")
+        cfg["artifact_sha"] = "a" * 64
+        cfg["known_hosts_sha"] = "b" * 64
+        return cfg
+
+    def test_collect_accepts_the_example(self):
+        """REGRESSION: the shipped example, digests filled in, collects one sample."""
+        self.write_config(self.example())
+        r = self.collect()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.samples()), 1)
+
+    def test_prune_accepts_the_example(self):
+        """REGRESSION: the shipped example, digests filled in, prunes under its own limits."""
+        self.seed()
+        self.write_config(self.example())
+        r = self.prune()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((len(self.samples()), self.outcome_lines()), (8, 8))
+
+    def test_status_does_not_warn_about_the_example(self):
+        """REGRESSION: `_comment` is not reported as an unknown key."""
+        self.seed()
+        self.write_config(self.example())
+        r = harness.run_cli(["status", "--transport", "mock", "--data-dir", self.data])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("unknown key", r.stderr)
+
+    def test_a_typo_beside_the_comment_is_still_refused(self):
+        """GUARD: `_comment` does not excuse a misspelt option in the same file."""
+        self.seed()
+        cfg = self.example()
+        cfg["retain_sample"] = cfg.pop("retain_samples")
+        self.write_config(cfg)
+        for r in (self.collect(), self.prune()):
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("retain_sample", r.stderr)
+        self.assertEqual((len(self.samples()), self.outcome_lines()), (8, 8))
+
+    def test_only_the_documented_metadata_key_is_exempt(self):
+        """GUARD: another underscore key is an unknown key like any other."""
+        self.seed()
+        self.write_config({"_retain_samples": 2})
+        r = self.prune()
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertEqual(len(self.samples()), 8)
+
+    def test_a_repeated_comment_is_still_a_repeated_key(self):
+        """GUARD: the repeated-key refusal applies to `_comment` too."""
+        self.seed()
+        self.write_config('{"_comment": "a", "_comment": "b"}')
+        r = self.prune()
+        self.assertEqual(r.returncode, 2, r.stderr)
+
+
+# ================== P2: standalone prune through another spelling of the data dir
+class TestPruneThroughAnAliasKeepsTheSampleStateNames(TempCase):
+    def setUp(self):
+        super().setUp()
+        self.alias = os.path.join(self.tmp, "alias")
+        os.makedirs(self.data)
+        os.symlink(self.data, self.alias, target_is_directory=True)
+
+    def collected(self, through):
+        """Five forward samples, then one after the clock steps back a day."""
+        clock, mono = [T0], [1000.0]
+        store = Store(through, retain_samples=100, log=quiet)
+        c = Collector(ScenarioTransport("success", log=quiet), store, log=quiet,
+                      clock=lambda: clock[0], monotonic=lambda: mono[0])
+        for _ in range(5):
+            self.assertEqual(c.collect_once()["outcome"], OUTCOME_SUCCESS)
+            clock[0] += 60
+            mono[0] += 60
+        clock[0] -= DAY
+        a = c.collect_once()
+        self.assertEqual(a["outcome"], OUTCOME_SUCCESS, a["detail"])
+        c.close()
+        return a["sample_path"]
+
+    def prune(self, through, keep):
+        r = harness.run_cli(["prune", "--data-dir", through, "--retain-samples", str(keep)])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def point_state_at(self, path):
+        state_path = os.path.join(self.data, "state.json")
+        with open(state_path) as fh:
+            state = json.load(fh)
+        state["last_valid_sample"]["path"] = path
+        with open(state_path, "w") as fh:
+            json.dump(state, fh)
+
+    def test_collected_by_the_original_path_pruned_through_the_alias(self):
+        """REGRESSION: prune to one through a symlink keeps the sample state names."""
+        newest = self.collected(self.data)
+        self.prune(self.alias, 1)
+        self.assertEqual(self.samples(), [os.path.basename(newest)])
+
+    def test_collected_through_the_alias_pruned_by_the_original_path(self):
+        """REGRESSION: the same, with the two spellings the other way round."""
+        newest = self.collected(self.alias)
+        self.prune(self.data, 1)
+        self.assertEqual(self.samples(), [os.path.basename(newest)])
+
+    def test_the_store_itself_matches_through_the_alias(self):
+        """REGRESSION: Store.prune, without the command line, has the same answer."""
+        newest = self.collected(self.data)
+        Store(self.alias, retain_samples=1, log=quiet).prune()
+        self.assertEqual(self.samples(), [os.path.basename(newest)])
+
+    def test_an_explicit_purge_through_the_alias_still_purges(self):
+        """GUARD: `--retain-samples 0` removes the state-named sample by either spelling."""
+        self.collected(self.data)
+        self.prune(self.alias, 0)
+        self.assertEqual(self.samples(), [])
+
+    def test_a_same_named_file_outside_the_store_is_not_this_stores_sample(self):
+        """GUARD: a pointer to another directory's file neither orders this store nor is deleted."""
+        newest = self.collected(self.data)
+        outside_dir = os.path.join(self.tmp, "elsewhere", "samples")
+        os.makedirs(outside_dir)
+        outside = os.path.join(outside_dir, os.path.basename(newest))
+        with open(outside, "w") as fh:
+            fh.write("{}")
+        self.point_state_at(outside)
+        latest_name = self.samples()[-1]
+        self.assertNotEqual(latest_name, os.path.basename(newest))
+        self.prune(self.alias, 1)
+        self.assertEqual(self.samples(), [latest_name])
+        self.assertTrue(os.path.isfile(outside), "prune deleted a file outside the store")
+
+    def test_a_legacy_relative_pointer_is_still_found_in_this_store(self):
+        """GUARD: an older relative record resolves by file name inside the store, by either spelling."""
+        newest = self.collected(self.data)
+        self.point_state_at(os.path.join("old-data-dir", "samples", os.path.basename(newest)))
+        self.prune(self.alias, 1)
+        self.assertEqual(self.samples(), [os.path.basename(newest)])
 
 
 if __name__ == "__main__":
