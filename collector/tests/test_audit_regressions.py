@@ -1,7 +1,7 @@
-"""Offline regressions for the evidence-loss defects in the independent audit.
+"""Offline regressions for the independent audit of `8778fb3` (collector 1.5.4).
 
-An independent audit of `8778fb3` (collector 1.5.4) reproduced three ways the
-collector deletes evidence while reporting success:
+The audit reproduced three ways the collector deletes evidence while reporting
+success:
 
   C1  retention prunes samples by their wall-clock FILENAME. When the retained set
       is at its limit and the clock steps back further than the set spans, the
@@ -13,8 +13,19 @@ collector deletes evidence while reporting success:
   C3  a retention count of zero or below is accepted during collection: the run
       exits 0 having deleted the sample (or the outcome log) it has just written
 
-Nothing here contacts a router. Every transport is the offline scenario transport,
-directly or through `--transport mock`.
+and three smaller hardening and classification gaps:
+
+  C5  `validate FILE` prints the document's `schema`, `tool` and `version` strings
+      raw, so escape bytes in a hostile file reach the terminal and a lone
+      surrogate ends the command with a traceback
+  C6  with `known_hosts_sha` absent, empty or null the pinned-file hash gate is
+      skipped without a word, although a missing `artifact_sha` is refused
+  C7  a stalled control-master establishment is recorded as `timeout`, the class
+      reserved for a reporter run that ended, though the reporter never started
+
+Nothing here contacts a router. Every transport is the offline scenario transport
+(directly or through `--transport mock`), or the real `SSHTransport` driven by the
+fake `ssh` or a local stand-in script.
 
 Tests whose docstring starts with REGRESSION fail on `8778fb3` and must pass after
 the correction. Tests whose docstring starts with GUARD pass on both: they pin what
@@ -23,7 +34,8 @@ configuration being honoured, and the explicit `prune --retain-samples 0` purge
 that `test_fixes.py` relies on).
 
 The regressions state the invariant, not the fix. C2 and C3 accept either a
-refusal (non-zero exit) or a run that keeps the evidence.
+refusal (non-zero exit) or a run that keeps the evidence; C6 accepts either a
+refusal or a diagnostic that names the unchecked file.
 
 No test touches real evidence: every data directory is created under a fresh
 temporary directory.
@@ -44,7 +56,10 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import harness                                                            # noqa: E402
-from rtax_telemetry.core import OUTCOME_SUCCESS, Collector                # noqa: E402
+from rtax_telemetry import transport                                      # noqa: E402
+from rtax_telemetry.core import (                                         # noqa: E402
+    OUTCOME_HOSTKEY, OUTCOME_SUCCESS, OUTCOME_TIMEOUT, Collector,
+)
 from rtax_telemetry.mock import ScenarioTransport                         # noqa: E402
 from rtax_telemetry.store import Store                                    # noqa: E402
 
@@ -255,6 +270,154 @@ class TestCollectionRejectsRetentionBelowOne(TempCase):
         r = harness.run_cli(["prune", "--data-dir", self.data, "--retain-samples", "0"])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(self.samples()), 0)
+
+
+# =========================================== C5: validate prints device strings
+class TestValidateSanitisesDeviceStrings(TempCase):
+    def document(self, **fields):
+        with open(harness.FIXTURE) as fh:
+            doc = json.load(fh)
+        doc.update(fields)
+        path = os.path.join(self.tmp, "document.json")
+        with open(path, "w") as fh:
+            json.dump(doc, fh)
+        return path
+
+    def validate(self, path):
+        import subprocess
+        return subprocess.run([sys.executable, os.path.join(ROOT, "collector.py"),
+                               "validate", path], capture_output=True, timeout=60)
+
+    def test_escape_bytes_in_tool_and_version_do_not_reach_the_terminal(self):
+        """REGRESSION: control bytes in `tool`/`version` are not printed raw."""
+        r = self.validate(self.document(tool="router_health\x1b]0;TITLE\x07\x1b[2J",
+                                        version="1.0.4\x1b[31mRED"))
+        out = r.stdout + r.stderr
+        self.assertFalse(any(b < 0x20 and b != 0x0A for b in out) or 0x7F in out,
+                         "raw control bytes on the terminal: %r" % out[:160])
+
+    def test_a_lone_surrogate_does_not_end_validate_with_a_traceback(self):
+        """REGRESSION: a lone surrogate in `tool` is reported, not a crash (exit 70)."""
+        r = self.validate(self.document(tool="x\ud800y"))
+        self.assertNotEqual(r.returncode, 70, r.stderr[-300:])
+        self.assertNotIn(b"Traceback", r.stderr)
+
+    def test_an_ordinary_document_is_still_reported_valid(self):
+        """GUARD: the fixture validates and its tool and version are shown as-is."""
+        r = self.validate(self.document())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"VALID router_health document", r.stdout)
+        self.assertIn(b"tool=router_health", r.stdout)
+
+    def test_an_invalid_document_is_still_rejected(self):
+        """GUARD: a schema failure still exits 1."""
+        r = self.validate(self.document(schema="something/else"))
+        self.assertEqual(r.returncode, 1, r.stdout)
+
+
+# ============================================== C6: the known_hosts hash gate
+class TestKnownHostsHashGateIsNotSilentlySkipped(TempCase):
+    ADDED = "192.0.2.1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIadded-after-review\n"
+
+    def write_config(self):
+        # The fake master goes away once `-O exit` reaches it, as a real one does.
+        gone = os.path.join(self.tmp, "master.gone")
+        return harness.write_ssh_config(self.data, self.tmp, mode="ok",
+                                        extra_env={"FAKE_SSH_MASTER_STATE": gone})
+
+    def configure(self, **overrides):
+        cfg = self.write_config()
+        with open(cfg["known_hosts"], "a") as fh:
+            fh.write(self.ADDED)                 # the pinned file no longer matches
+        for key, value in overrides.items():
+            if value is KeyError:
+                cfg.pop(key)
+            else:
+                cfg[key] = value
+        with open(os.path.join(self.data, "config.json"), "w") as fh:
+            json.dump(cfg, fh)
+
+    def collect(self):
+        return harness.run_cli(["collect", "--once", "--data-dir", self.data])
+
+    def assert_not_silent(self, r):
+        text = r.stderr.lower()
+        said = "known_hosts" in text and ("hash" in text or "sha" in text)
+        self.assertTrue(r.returncode != 0 or said,
+                        "exit 0 with an altered known_hosts file and no diagnostic:\n%s"
+                        % r.stderr[-400:])
+
+    def test_absent_hash_is_not_silently_accepted(self):
+        """REGRESSION: no `known_hosts_sha` key does not skip the gate without a word."""
+        self.configure(known_hosts_sha=KeyError)
+        self.assert_not_silent(self.collect())
+
+    def test_empty_hash_is_not_silently_accepted(self):
+        """REGRESSION: `known_hosts_sha: ""` does not skip the gate without a word."""
+        self.configure(known_hosts_sha="")
+        self.assert_not_silent(self.collect())
+
+    def test_null_hash_is_not_silently_accepted(self):
+        """REGRESSION: `known_hosts_sha: null` does not skip the gate without a word."""
+        self.configure(known_hosts_sha=None)
+        self.assert_not_silent(self.collect())
+
+    def test_a_configured_hash_still_refuses_an_altered_file(self):
+        """GUARD: with the hash configured, an altered file is an artifact mismatch."""
+        self.configure()
+        r = self.collect()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("outcome=artifact_mismatch", r.stderr)
+
+    def test_a_configured_hash_accepts_the_reviewed_file(self):
+        """GUARD: with the hash configured and the file intact, collection succeeds."""
+        self.write_config()
+        r = self.collect()
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
+# ====================================== C7: a stalled master is not a `timeout`
+class TestStalledMasterEstablishmentIsNotAReporterTimeout(TempCase):
+    def stalled_attempt(self):
+        stall = os.path.join(self.tmp, "stall-ssh")
+        with open(stall, "w") as fh:
+            fh.write("#!/bin/sh\nsleep 30\n")
+        os.chmod(stall, 0o755)
+        artifact = harness.make_artifact(self.tmp)
+        old = transport.REAP_GRACE
+        transport.REAP_GRACE = 0.5
+        self.addCleanup(setattr, transport, "REAP_GRACE", old)
+        tr = transport.SSHTransport(
+            "192.0.2.1", "routeradmin", artifact=artifact,
+            known_hosts=harness.make_known_hosts(self.tmp),
+            artifact_sha=harness._sha(artifact), ssh_bin=stall,
+            connect_timeout=-18,                 # local bound: -18 + 20 = 2 s
+            interactive_auth=False, log=quiet)
+        c = Collector(tr, Store(self.data, log=quiet), log=quiet)
+        try:
+            return c.collect_once()
+        finally:
+            c.close()
+
+    def test_a_stalled_master_is_not_classified_timeout(self):
+        """REGRESSION: `timeout` is not used when the reporter never started."""
+        a = self.stalled_attempt()
+        self.assertNotEqual(a["outcome"], OUTCOME_TIMEOUT, a["detail"])
+
+    def test_the_detail_names_master_establishment(self):
+        """REGRESSION: the record says which stage stalled."""
+        a = self.stalled_attempt()
+        self.assertIn("master", a["detail"].lower())
+
+    def test_a_hostkey_mismatch_at_establishment_keeps_its_class(self):
+        """GUARD: establishment failures that have their own class keep it."""
+        tr = harness.make_transport(self.tmp, "hostkey_mismatch")
+        c = Collector(tr, Store(self.data, log=quiet), log=quiet)
+        try:
+            a = c.collect_once()
+        finally:
+            c.close()
+        self.assertEqual(a["outcome"], OUTCOME_HOSTKEY, a["detail"])
 
 
 if __name__ == "__main__":
