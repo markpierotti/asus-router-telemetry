@@ -387,9 +387,10 @@ class TestStalledMasterEstablishmentIsNotAReporterTimeout(TempCase):
         old = transport.REAP_GRACE
         transport.REAP_GRACE = 0.5
         self.addCleanup(setattr, transport, "REAP_GRACE", old)
+        known_hosts = harness.make_known_hosts(self.tmp)
         tr = transport.SSHTransport(
             "192.0.2.1", "routeradmin", artifact=artifact,
-            known_hosts=harness.make_known_hosts(self.tmp),
+            known_hosts=known_hosts, known_hosts_sha=harness._sha(known_hosts),
             artifact_sha=harness._sha(artifact), ssh_bin=stall,
             connect_timeout=-18,                 # local bound: -18 + 20 = 2 s
             interactive_auth=False, log=quiet)
