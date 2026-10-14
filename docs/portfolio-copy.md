@@ -8,8 +8,8 @@ and license have been selected; no public URL is assumed here.
 
 ### Making a stock router observable
 
-Custom ARM telemetry, a Python SSH collector and hardware-tested outage detection
-on an ASUS RT-AX56U. I directed an AI-assisted engineering workflow from firmware
+Custom ARM telemetry and a Python SSH collector, with supervised hardware tests
+for management-link failure detection and recovery on an ASUS RT-AX56U. I directed an AI-assisted engineering workflow from firmware
 analysis through review, regression testing and supervised recovery trials.
 
 **Stack:** C · Python · Linux · ARM · OpenSSH · Ghidra · Docker/QEMU
