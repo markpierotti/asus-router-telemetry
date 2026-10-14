@@ -10,14 +10,14 @@ JSON, derives CPU utilisation and records collection incidents. Routine collecti
 makes **zero model calls**.
 
 The project combines firmware analysis, cross-compilation, process handling,
-defensive parsing and physical-device validation. Mark Pierotti directed the work
-with Hermes and AI coding agents; [provenance](docs/provenance.md) explains the
+defensive parsing and physical-device validation. I directed the work with Hermes
+and AI coding agents; [provenance](docs/provenance.md) explains the
 human contribution, assisted implementation and independent verification.
 
 ## Part of a larger home lab
 
-This is the first completed component of Mark Pierotti’s planned home networking
-and security lab: collecting bounded, validated device telemetry and preserving
+This is the first completed component of my planned home networking and security
+lab: collecting bounded, validated device telemetry and preserving
 evidence when a management connection fails. Next stages will explore Linux-hosted
 collection, network segmentation, traffic visibility and detection engineering.
 The [home-lab roadmap](docs/home-lab-roadmap.md) separates this released milestone
