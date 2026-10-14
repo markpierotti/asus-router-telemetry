@@ -7,6 +7,18 @@ and a hardware-backed record of collection, incident detection, recovery and cle
 
 **Current milestone (2026-10-14):** collector 1.5.5 / reporter 1.0.5 passed separate healthy-path and Ethernet dropout/recovery acceptance. The latest dropout trial recorded 18 attempts, 12 successes and six expected failures, with threshold transitions, CPU deltas and manual cleanup verified. [Current evidence](dropout-recovery-20261014.md); earlier results below keep their original scope.
 
+## Why this project matters to the home lab
+
+I’m building a home networking and security lab to investigate how devices behave,
+how failures become visible, and how segmentation contains unwanted traffic.
+ASUS Router Telemetry is its first completed component. It establishes a documented
+experimental telemetry milestone that the next stages can build on.
+
+Device-health data and collection failures will be one input to the broader lab.
+Network captures, detection rules, alert triage and response exercises need their
+own implementation and acceptance evidence. The [roadmap](home-lab-roadmap.md)
+records that planned work; a deployed SOC remains a future goal.
+
 ## The engineering problem
 
 A successful decompilation or one valid JSON response was not enough. The software

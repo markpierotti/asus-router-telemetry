@@ -45,5 +45,6 @@ preserved and compared with the privately archived history.
 
 The repository is public and licensed under MIT. GitHub private vulnerability
 reporting is enabled; SECURITY.md describes the reporting guidance and security
-boundaries. The immutable v0.1.0 tag retains its tested source snapshot; this
-documentation update records publication without changing that tag or its code.
+boundaries. The v0.1.0 tag remains fixed at its accepted source snapshot,
+`5a68321cb1bbd6d712d3fe1f16516a9c2a835d59`. Documentation updates record
+publication without moving that tag or changing its code.

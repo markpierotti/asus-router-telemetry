@@ -8,7 +8,7 @@ the portable configuration has offline test evidence. This is not a production
 support commitment or a certification of the router firmware.
 
 For a suspected vulnerability, use GitHub private vulnerability reporting through
-the repository's Security tab once the maintainer has enabled it. Do not include
+the repository's Security tab. Reporting is enabled. Do not include
 live passwords, private keys, full host-key files or unredacted device captures.
 Include affected versions, the relevant code path, prerequisites, impact and a
 minimal synthetic reproduction. No response-time guarantee is offered.

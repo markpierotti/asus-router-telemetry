@@ -42,6 +42,15 @@ Code and security review findings were reproduced and addressed through behavior
 regression tests. The case study distinguishes these results from future work:
 unattended operation, AP/NAS roles and long-term reliability have not been established.
 
+## Broader home-lab context
+
+I’m building a home networking and security lab to investigate device behavior,
+collection failures and traffic containment. ASUS Router Telemetry is the first
+completed component, supported by supervised hardware trials and automated
+regression tests. Linux-host integration, Project Limbo’s simulated IoT exercises,
+and detection/investigation workflows are planned next stages. A deployed SOC
+remains future work. See the [roadmap](home-lab-roadmap.md).
+
 ## CV bullets
 
 - Directed an AI-assisted embedded Linux project: firmware analysis, static ARM C
