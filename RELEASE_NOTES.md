@@ -35,7 +35,12 @@ included. Future ARM builds may differ because apt packages are not pinned.
 
 Multi-hour runs, unattended authentication, power-loss/reboot handling, AP and USB
 NAS roles remain future work. No service, automatic remediation or full-network
-SOC is deployed by this release. Hosted CI acceptance is pending its first run.
+SOC is deployed by this release. The offline matrix passed on ubuntu-24.04 and
+macos-15 with Python 3.11 and 3.13: 368 collector tests passed per job, one
+expected no-controlling-terminal skip, and all reporter checks passed. Real
+controlling-PTY tests passed. The publication history changes commit email
+metadata; every original commit tree, message, author name and timestamp was
+preserved and compared with the privately archived history.
 
 This is a private GitHub release candidate under markpierotti/asus-router-telemetry,
 licensed under MIT. Public visibility and a release tag remain pending owner approval.

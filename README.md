@@ -102,4 +102,5 @@ Earlier hardware records retain their original version boundaries.
 
 **License:** [MIT](LICENSE), copyright 2026 Mark Pierotti. Third-party tools and
 vendor firmware are not distributed. See [SECURITY.md](SECURITY.md) for security
-boundaries and reporting guidance.
+boundaries and reporting guidance. [Release versioning](docs/releases.md) separates
+project milestones from collector and reporter versions.
