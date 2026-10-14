@@ -1,8 +1,9 @@
-# Initial portfolio release candidate
+# v0.1.0 — Initial experimental release
 
 Component versions: collector **1.5.5**, reporter **1.0.5**, JSON schema
-`router_health/2`. Project release tag remains to be selected. Production source
-identities and the accepted ARM digest are recorded in the acceptance documents.
+`router_health/2`. [Project release v0.1.0](https://github.com/markpierotti/asus-router-telemetry/releases/tag/v0.1.0)
+is published as an experimental milestone. Production source identities and the
+accepted ARM digest are recorded in the acceptance documents.
 
 ## Included
 
@@ -42,7 +43,7 @@ controlling-PTY tests passed. The publication history changes commit email
 metadata; every original commit tree, message, author name and timestamp was
 preserved and compared with the privately archived history.
 
-This is a private GitHub release candidate under markpierotti/asus-router-telemetry,
-licensed under MIT. Public visibility and a release tag remain pending owner approval.
-GitHub private vulnerability reporting must be enabled before a public release;
-SECURITY.md describes the reporting guidance and security boundaries.
+The repository is public and licensed under MIT. GitHub private vulnerability
+reporting is enabled; SECURITY.md describes the reporting guidance and security
+boundaries. The immutable v0.1.0 tag retains its tested source snapshot; this
+documentation update records publication without changing that tag or its code.

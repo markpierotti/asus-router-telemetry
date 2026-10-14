@@ -5,10 +5,9 @@ documentation and validation records. Component versions identify changes to
 those individual programs. A new project release does not automatically change
 both component versions.
 
-The initial candidate includes collector 1.5.5, reporter 1.0.5 and JSON schema
-router_health/2. Its project tag is still awaiting maintainer selection; v0.1.0
-is the proposed first public milestone. The project remains experimental despite
-the historical component version numbers.
+The initial public milestone is [v0.1.0](https://github.com/markpierotti/asus-router-telemetry/releases/tag/v0.1.0),
+including collector 1.5.5, reporter 1.0.5 and JSON schema router_health/2. The
+project remains experimental despite the historical component version numbers.
 
 For future project tags, use 0.MINOR.PATCH until the project declares a stable
 supported contract. Increase MINOR for a new deployment role or substantial

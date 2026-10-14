@@ -1,9 +1,9 @@
 # Portfolio and CV copy
 
 This copy describes collector 1.5.5 / reporter 1.0.5 and the supervised hardware
-results recorded on 2026-10-14. The MIT-licensed candidate is prepared for
-markpierotti/asus-router-telemetry. Add its public link to the website only after
-public visibility has been approved.
+results recorded on 2026-10-14. The MIT-licensed project is public at
+[markpierotti/asus-router-telemetry](https://github.com/markpierotti/asus-router-telemetry),
+with an initial experimental [v0.1.0 release](https://github.com/markpierotti/asus-router-telemetry/releases/tag/v0.1.0).
 
 ## Website card
 
