@@ -21,12 +21,15 @@ than assume that a path or reported process ID was safe to act on.
 - A statically linked C reporter validated on stock ARMv7 firmware, without flashing a custom image.
 - A Python standard-library collector with pinned identity/artifact checks, bounded execution and output, local retention, CPU deltas and deterministic incident thresholds.
 - Behavioural regression tests for defects found through independent code/security review, including real controlling-terminal input and descendant-process cleanup.
-- A supervised dropout trial: **16 attempts, 10 accepted samples, six expected unreachable failures**, incident opening after three failures and resolution after two recovery successes.
+- The current supervised dropout trial: **18 attempts, 12 accepted samples, six expected unreachable failures**, incident opening after three failures and resolution after two recovery successes.
 - Evidence that cleanup uncertainty survived recovery, followed by scoped manual removal and a separate absence check. Historical evidence remained unchanged.
 
-The [hardware record](dropout-recovery.md) states the exact versions and limits. The
-published [numeric summary](../evidence/dropout-summary.json) lets readers check the
-CPU arithmetic without disclosing device access details.
+The [current hardware record](dropout-recovery-20261014.md) states the exact versions
+and limits. The [published numeric summary](../evidence/dropout-summary-20261014.json)
+records trial counts and reconciliation without disclosing device access details.
+The [earlier 16-attempt trial](dropout-recovery.md) and its
+[numeric summary](../evidence/dropout-summary.json) remain historical evidence for
+collector 1.5.4 / reporter 1.0.4.
 
 ## How I used AI agents
 

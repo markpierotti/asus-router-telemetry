@@ -2,7 +2,7 @@
 
 Updated: 2026-10-14. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
 
-## Current revision: reporter 1.0.5 / collector 1.5.5 (supervised healthy-path accepted)
+## Current revision: reporter 1.0.5 / collector 1.5.5 (healthy path and dropout accepted)
 
 The source in this tree is reporter **1.0.5** and collector **1.5.5**: corrections from
 an independent audit of 1.0.4 / 1.5.4 and two review rounds of those corrections.
@@ -49,7 +49,7 @@ ASan/UBSan host build. Known limits: removal order among older samples after a b
 clock step is approximate; a standalone `prune` with no usable state pointer uses
 file-name order.
 
-## Current identities
+## Historical identities: reporter 1.0.4 / collector 1.5.4
 
 The identities in this section are historical: reporter 1.0.4 with collector 1.5.4,
 which passed dropout/recovery. They are unchanged by the new supervised healthy-path
@@ -72,7 +72,8 @@ with bench collector 1.5.4 for the supervised healthy-path and Ethernet dropout 
 The **historically hardware-accepted** v1.0.3 artifact (`3069b2bd…2ce0eb`) produced the 17
 accepted samples recorded in the [collector hardware record](collector-hardware-test.md).
 Earlier v1.0.3 and v1.0.2 artifacts remain private historical evidence, not files distributed
-in this repository. The active bench artifact is the v1.0.4 digest above:
+in this repository. At that historical checkpoint the active bench artifact was
+the v1.0.4 digest above; the current v1.0.5 identity is in the acceptance record:
 
 ```
 3069b2bd3290ab3bb1db2d49b60e7e7c6a8e5090e4735537980c65926d2ce0eb   (reporter v1.0.3 — HARDWARE-ACCEPTED)

@@ -15,3 +15,6 @@ __pycache__/
 /collector/data/
 /collector/config.json
 *.pyc
+
+# Local coding-agent state and nested worktrees
+/.claude/
