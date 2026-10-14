@@ -1,5 +1,7 @@
 # ASUS Router Telemetry
 
+[![Offline tests](https://github.com/markpierotti/asus-router-telemetry/actions/workflows/offline-tests.yml/badge.svg?branch=main)](https://github.com/markpierotti/asus-router-telemetry/actions/workflows/offline-tests.yml)
+
 **Custom ARM telemetry on stock firmware, with supervised hardware tests for collection, link loss and recovery.**
 
 A small C reporter runs temporarily on an ASUS RT-AX56U. A Python standard-library
