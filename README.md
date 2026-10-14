@@ -14,6 +14,15 @@ defensive parsing and physical-device validation. Mark Pierotti directed the wor
 with Hermes and AI coding agents; [provenance](docs/provenance.md) explains the
 human contribution, assisted implementation and independent verification.
 
+## Part of a larger home lab
+
+This is the first completed component of Mark Pierotti’s planned home networking
+and security lab: collecting bounded, validated device telemetry and preserving
+evidence when a management connection fails. Next stages will explore Linux-hosted
+collection, network segmentation, traffic visibility and detection engineering.
+The [home-lab roadmap](docs/home-lab-roadmap.md) separates this released milestone
+from the planned work, including Project Limbo and security-operations exercises.
+
 ## Measured results
 
 Current accepted bench pair: **collector 1.5.5 / reporter 1.0.5**, on stock
