@@ -100,5 +100,6 @@ Credentials, actual host keys, private configuration, raw history, vendor firmwa
 and extracted proprietary binaries are excluded. Local agent worktrees are ignored.
 Earlier hardware records retain their original version boundaries.
 
-**License:** an open-source license has not yet been selected. This snapshot grants
-no additional license; third-party tools and vendor firmware are not distributed.
+**License:** [MIT](LICENSE), copyright 2026 Mark Pierotti. Third-party tools and
+vendor firmware are not distributed. See [SECURITY.md](SECURITY.md) for security
+boundaries and reporting guidance.

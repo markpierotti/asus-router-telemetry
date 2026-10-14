@@ -1,8 +1,9 @@
 # Portfolio and CV copy
 
 This copy describes collector 1.5.5 / reporter 1.0.5 and the supervised hardware
-results recorded on 2026-10-14. Link to the published repository when a destination
-and license have been selected; no public URL is assumed here.
+results recorded on 2026-10-14. The MIT-licensed candidate is prepared for
+markpierotti/asus-router-telemetry. Add its public link to the website only after
+public visibility has been approved.
 
 ## Website card
 
