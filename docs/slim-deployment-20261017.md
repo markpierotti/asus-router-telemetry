@@ -30,7 +30,7 @@ means telemetry is unavailable; it does not prove the router has failed.
 
 | Evidence | Source | What it establishes |
 | --- | --- | --- |
-| Collector 1.6.0, reporter 1.0.5 deployed; 386 collector tests reported passing on Slim | Claude deployment session, 17 October | Recorded commissioning result; not independently rerun by this documentation update |
+| Collector 1.6.0, reporter 1.0.5 deployed; 386 collector tests reported run on Slim | Claude deployment session, 17 October | Recorded commissioning result; not independently rerun by this documentation update |
 | Collector started at 14:14; router exporter at 14:16 | Operator-supplied `systemctl status`, 18:34 AEST | Both were active and enabled at inspection |
 | Latest sample logged at 18:33 | Same collector journal excerpt | Collection was producing samples about four hours after startup; not a complete audit of every intervening attempt |
 | Pi-hole, Prometheus, node exporter, blackbox exporter, Grafana and both custom exporters active and enabled | Same service status output | Eight named services were running; running processes alone do not prove every probe or DNS response was healthy |
@@ -58,14 +58,28 @@ The source change originated as private-development commit `34b883a` on
 `feature/key-auth`. This publication branch carries that patch without importing
 private-development history. Deployed component versions are collector **1.6.0**, reporter
 **1.0.5**, schema `router_health/2`; the historical project tag **v0.1.0** is unchanged. This publication branch also
-contains an undeployed **1.6.1** storage correction; it syncs the samples directory
-after a sample rename instead of only the top-level data directory.
+contains undeployed collector **1.6.2**, including the 1.6.1 sample-directory sync
+correction and a dedicated loop hard-stop exit code. Version 1.6.2 and its matching
+service unit are **pending deployment**.
 
 The collector runs under the unprivileged `rtax` account every 60 seconds. Its
-private key is explicit, with no password or agent fallback. Pinned host-key and
-reporter-hash checks remain enforced. The systemd unit prevents automatic restart
-after identity/artifact hard stops, invalid configuration or a lock conflict.
+private key is `/home/rtax/keys/id_ed25519`, with no password or agent fallback.
+Pinned host-key and reporter-hash checks remain enforced. In the **1.6.2 repository
+example**, exit 4 means a loop identity/artifact hard stop and exit 2 means bad
+configuration; neither is restarted. Exit 1 covers other collection/CLI failures,
+and exit 3 covers a held lock or storage error taking it; both are retried.
+This code/unit pair is not deployed.
 The previous application directory was retained during commissioning for rollback.
+
+At **21:58 AEST on 17 October**, the owner reported two live corrections, backed
+up under `/var/backups/slim-manual/20261017-215821/`: Pi-hole panel 8 uses
+`probe_dns_duration_seconds{job="dns_pihole",phase="request"}` with legend
+`Pi-hole answer`, and the deployed **1.6.0** unit uses `RestartPreventExitStatus=1 2`.
+That interim unit retries exit 3 but still blocks exit 1 because 1.6.0 uses it for
+identity/artifact hard stops as well as other failures. The repository dashboard
+matches the reported correction. Its newer `4 2` unit must be deployed together
+with collector 1.6.2. These are owner-reported changes, not a new live verification
+by this documentation update.
 
 The ASUS web form initially saved a truncated public key. A complete key was
 installed through the operator's authenticated router session, and key login then
@@ -89,7 +103,10 @@ The timer starts backups after 03:30 with up to 15 minutes of random delay and
 keeps 14 archives. A Mac launchd job pulls daily at 09:00 and keeps 30. Archives
 include private Pi-hole/Grafana data and configuration, collector state and pinned
 artifacts, scripts and service units. They exclude Prometheus history and the
-collector private key. They are private recovery material, not publication assets.
+collector private key at `/home/rtax/keys/id_ed25519`. Its exclusion depends on
+keeping it outside the archived `/home/rtax/data` and `/home/rtax/pinned` trees;
+there is no filename-based private-key exclusion. Archives are private recovery
+material, not publication assets.
 The backup script's optional config archive tolerates read failures; an archive and
 success timestamp alone do not prove completeness. See the [recovery runbook](slim-operations.md).
 

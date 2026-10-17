@@ -2,13 +2,15 @@
 
 Updated: 2026-10-17. Remediation sections retain their historical test boundaries; current hardware status is stated separately. Results distinguish private bench hardware work from this portable repository's offline checks.
 
-## Current source: reporter 1.0.5 / collector 1.6.1 (unreleased)
+## Current source: reporter 1.0.5 / collector 1.6.2 (unreleased)
 
-Collector 1.6.1 corrects the parent-directory sync used after atomic sample writes.
-This fix is publication-only and has not been deployed to Slim.
+Collector 1.6.2 adds loop hard-stop exit 4, distinct from ordinary failure exit 1;
+the matching unit blocks restarts only for 4 and bad-configuration exit 2.
+It includes the 1.6.1 correction to sample parent-directory sync. Both source fixes
+remain pending deployment to Slim, which runs 1.6.0.
 Collector 1.6.0 added optional explicit public-key authentication. Its change originated
 as `34b883a` in the private development checkout and was ported onto public history.
-The commissioning session reported 386 collector tests passing on Slim. A later
+The commissioning session reported 386 collector tests run on Slim (the retained summary does not establish a zero-skip count). A later
 operator check showed its unattended service active with a recent sample; see the
 [17 October deployment record](slim-deployment-20261017.md) for source and limits.
 Local verification of this publication branch is recorded in the

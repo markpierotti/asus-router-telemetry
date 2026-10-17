@@ -60,7 +60,7 @@
     },
     {
      "uid": "gateway-down",
-     "title": "TP-Link gateway unreachable",
+     "title": "Main gateway unreachable",
      "condition": "B",
      "data": [
       {
@@ -102,7 +102,7 @@
      "noDataState": "Alerting",
      "execErrState": "Error",
      "annotations": {
-      "summary": "slim can't ping the TP-Link gateway (192.0.2.1)."
+      "summary": "slim can't ping the Main gateway (192.0.2.1)."
      },
      "labels": {
       "severity": "critical"

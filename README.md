@@ -110,7 +110,7 @@ unknown because there are no previous counters; the aggregate is `null`.
 ```json
 {
   "schema": "rtax_telemetry.sample/1",
-  "collector_version": "1.6.1",
+  "collector_version": "1.6.2",
   "outcome": "success",
   "derived": {
     "cpu_utilisation": {
@@ -143,7 +143,9 @@ Collector **1.6.0** adds explicit key authentication. The accompanying Slim exam
 runs it under systemd, with external exporters and Grafana alert evaluation.
 At the 17 October live check, the collector was still producing samples about four
 hours after startup. This is an observation, not a controlled endurance trial.
-This branch also contains an undeployed **1.6.1** storage correction.
+This branch contains undeployed **1.6.2**, including the storage correction and
+a distinct loop hard-stop exit code. Deploy its matching service unit together
+with the collector; see the [review dispositions](docs/slim-review-triage-20261017.md).
 The earlier v0.1.0 release and its v1.5.5 bench acceptance remain unchanged.
 
 Controlled reboot/power-loss recovery, a backup restore rehearsal, external alert

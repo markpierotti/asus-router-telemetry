@@ -64,7 +64,8 @@ Its `files.tar.gz` step uses `--ignore-failed-read` and tolerates tar errors. Re
 the nested archive's member list against required recovery files; a reported success
 can coexist with missing optional files. The current success metric establishes
 archive creation, not full recovery readiness. Prometheus TSDB and the collector's
-private key are excluded. Do not upload archives: they can contain Wi-Fi credentials,
+private key at `/home/rtax/keys/id_ed25519` are excluded, provided the key remains
+outside the archived data and pinned directories. Do not upload archives: they can contain Wi-Fi credentials,
 Grafana secrets, DNS history and device inventory.
 
 ## Restore rehearsal

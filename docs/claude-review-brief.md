@@ -1,11 +1,20 @@
-# Claude review brief: Slim publication update
+# Claude source review: record and original scope
 
 The owner requested Codex and Claude collaborate on preparing the deployed home
-lab for GitHub. Claude's original session supplied the implementation sources;
-a fresh CLI review was attempted during this update but returned `Not logged in`.
-This document requests a fresh review; it is not a claim that Claude approved it.
+lab for GitHub. Claude's original session supplied the implementation sources.
+On **2026-10-17**, a fresh source review completed after the owner-authorized
+retry outside the sandbox. The [archived report](reviews/claude-pr4-20261017.md)
+reviews head `b8cf1c1`; [finding dispositions](slim-review-triage-20261017.md)
+record the later 1.6.2 corrections, which are not deployed to Slim.
 
-Review the current branch against `main`, especially:
+Claude did not compare the diff against `main`, independently verify hosted CI,
+run commands or tools, access devices or credentials, or confirm commissioning
+session claims. Its review **does not approve hardware or runtime behavior**,
+including reboot, power recovery, restore, notification delivery or systemd
+sandbox behavior. This is a completed source review with those limits, not an
+approval of every subsequent change.
+
+The original requested scope was:
 
 - Faithfulness of the recovered deployment examples to the 17 October commissioning
   session, including 13 rules, dedicated accounts and local-only metrics listeners.
@@ -30,5 +39,5 @@ Follow-up reran wait-online successfully and showed zero failed units. Ethernet
 carrier arrived after the original boot timeout. No network change was made.
 Telegram and an external uptime check remain pending.
 
-Return file-specific findings. Do not access live devices, alter networking, read
-credentials or publish changes as part of this review.
+The source-only access restrictions were observed. The report explicitly notes
+that it could not complete the requested comparison against `main`.

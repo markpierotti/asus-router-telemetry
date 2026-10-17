@@ -2,14 +2,19 @@
 
 Project lead: Mark Pierotti.
 
-The current source versions are reporter **1.0.5** and collector **1.6.1** (unreleased).
-Slim remains on deployed collector **1.6.0**; the publication-only storage fix has
-not been installed there.
+The current source versions are reporter **1.0.5** and collector **1.6.2** (unreleased).
+Slim remains on deployed collector **1.6.0**. Source-only storage and loop-exit
+corrections, including the matching 1.6.2 service unit, remain pending deployment.
+The owner's separately reported 21:58 dashboard/interim-unit corrections are
+recorded in the deployment record.
 Claude implemented the key-auth change and commissioned the Slim services on
 2026-10-17; Codex ported that patch onto publication history and prepared sanitized
 source examples, operations documentation and an operator-evidence record.
-A fresh Claude review was requested but its CLI was not logged in at preparation;
-the [review brief](claude-review-brief.md) records the outstanding review scope.
+Claude completed a fresh [source review](reviews/claude-pr4-20261017.md) on
+2026-10-17 after the authorized retry outside the sandbox. It reviewed `b8cf1c1`;
+it did not compare the main diff, independently inspect hosted CI, run checks,
+access devices or approve hardware/runtime behavior. The
+[triage record](slim-review-triage-20261017.md) tracks the subsequent corrections.
 The [deployment record](slim-deployment-20261017.md) distinguishes prior session
 claims, operator-supplied status and remaining validation.
 

@@ -1,7 +1,7 @@
 # Foreground telemetry collector
 
 Python standard-library collector adapted from the RT-AX56U bench implementation.
-Current source: **1.6.1 (unreleased)**; Slim runs **1.6.0**. Historical hardware
+Current source: **1.6.2 (unreleased)**; Slim runs **1.6.0**. Historical hardware
 acceptance belongs to the 1.5.5 private bench adaptation; see
 [Validation boundary](#validation-boundary).
 
@@ -76,7 +76,7 @@ From 1.5.5 the limits are checked before anything is deleted. In `config.json`, 
 
 Sample file names are wall-clock timestamps. When the collector host's clock steps backwards, the sample just written, and for a standalone `prune` the last accepted sample that `state.json` names, is still the last one removed, whichever spelling of the data directory is used (the directory itself or a symlink to it). The order among the *older* samples is then by file name and is approximate. With no usable state pointer (no `state.json`, or a recorded absolute path that no longer exists because the directory was moved or the symlink it was written through is gone) a standalone `prune` falls back to file-name order.
 
-Exit codes: **0** success, **1** collection failure or a hard stop, **2** an invalid option (a non-finite/too-small `--interval`, or one at/above `ControlPersist`; from 1.5.5 also a `config.json` that cannot be used as written, an unusable retention or size limit, or a missing or malformed `known_hosts_sha`), **3** overlap lock, **5** cleanup could not be confirmed after an otherwise successful collection, **6** the evidence could not be written, **130** interrupted (Ctrl-C, `SIGTERM` or `SIGHUP`), including an interrupt that arrives during teardown after an otherwise successful collection. A cleanup failure and a persistence failure are each reported separately and never mask an original collection failure.
+Exit codes: **0** success, **1** collection/CLI failure (including a one-shot identity failure), **2** an invalid option (a non-finite/too-small `--interval`, or one at/above `ControlPersist`; from 1.5.5 also a `config.json` that cannot be used as written, an unusable retention or size limit, or a missing or malformed `known_hosts_sha`), **3** overlap lock or a storage error taking it, **4** loop host-key/artifact hard stop (from 1.6.2), **5** cleanup could not be confirmed after an otherwise successful collection, **6** the evidence could not be written, **130** interrupted (Ctrl-C, `SIGTERM` or `SIGHUP`), including an interrupt that arrives during teardown after an otherwise successful collection. A cleanup failure and a persistence failure are each reported separately and never mask an original collection failure.
 
 ## Containment and outcome classes
 
@@ -114,7 +114,15 @@ Every multiplexed command is gated on `ssh -O check`; a lost control master beco
 
 The ssh option set is hermetic: `-F /dev/null` ignores `~/.ssh/config`, the system-wide known-hosts file is disabled, and agent forwarding, connection forwarding, `ProxyCommand`, `KnownHostsCommand` and `UpdateHostKeys` are pinned off, so ambient configuration cannot alter the connection. `SSH_ASKPASS*` is removed from the child environment, so a password can only come from the operator's terminal.
 
-Evidence files are created `0600` and their directories `0700` regardless of the operator's umask; writes are `fsync`ed (file and directory); a torn trailing line in the append-only logs is terminated before the next record is appended; and the lock file is opened `O_NOFOLLOW`, so a symlink placed at the lock path is refused rather than followed and truncated.
+Evidence files are created `0600` and their directories `0700` regardless of the
+operator's umask. Atomic replacements of samples, state and pruned outcome logs
+sync the file and attempt to sync its actual parent directory; directory sync is
+best effort where the OS rejects it. Appends sync the log file but do not sync a
+new log's directory entry. Quarantining corrupt state and deleting pruned samples
+also do not sync their directory entries. These operations do not guarantee
+recovery from every crash or storage failure. A torn trailing line is terminated
+before the next append. The lock file is opened `O_NOFOLLOW`, so a symlink at its
+path is refused rather than followed and truncated.
 
 ## Validation boundary
 

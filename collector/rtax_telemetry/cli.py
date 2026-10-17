@@ -62,6 +62,7 @@ EXIT_OK = 0
 EXIT_COLLECTION_FAILURE = 1
 EXIT_BAD_OPTION = 2
 EXIT_LOCK_HELD = 3
+EXIT_HARD_STOP = 4
 EXIT_CLEANUP_FAILURE = 5
 EXIT_EVIDENCE_NOT_PERSISTED = 6
 EXIT_INTERRUPTED = 130
@@ -581,7 +582,7 @@ def run_loop(collector, store, interval):
                 # of a mismatch it will never recover from by itself.
                 log("HARD STOP: %s is not retryable - stopping the loop without further "
                     "attempts" % attempt["outcome"])
-                return EXIT_COLLECTION_FAILURE
+                return EXIT_HARD_STOP
             i += 1
             target = base + i * interval
             now = time.monotonic()

@@ -50,13 +50,16 @@ are supplied. Set and store web-administration credentials privately.
    existing package configuration. This tree is not a package installer.
 2. Create the dedicated unprivileged `rtax` account and application, data, pinned
    artifact and key directories. Deploy this repository's source at `/home/rtax/app`.
-   Keep the private key `0600`, its directory `0700`, and owned by `rtax`. Start with
+   Keep the private key at `/home/rtax/keys/id_ed25519` (`0600`), its directory
+   `/home/rtax/keys` (`0700`), and both owned by `rtax`. Start with
    [collector/config.example.json](../../collector/config.example.json); populate a
    private `/home/rtax/data/config.json` with the actual target, trusted pins, artifact
    digest and `identity_file`. Set `interactive_auth` false. Do not commit that file.
 3. Verify the router host identity independently. Install the collector's public key
    through trusted router administration and verify it saved in full. Run one-shot
-   key collection as `rtax` before enabling the service. Never publish the private key
+   key collection as `rtax` before enabling the service. This service example
+   requires collector **1.6.2** (`RestartPreventExitStatus=4 2`); do not install it
+   with deployed 1.6.0, which uses exit 1 for hard stops. Never publish the private key
    or replace verification with an automatic key scan.
 4. Install reviewed scripts under `/usr/local/bin` as root-owned executables and
    units under `/etc/systemd/system`. Allow `rtax` to write its private data directory;
@@ -128,8 +131,9 @@ Do not publish live metrics, exports or unsanitized dashboard screenshots.
 Backups contain private application databases and possibly secrets. Never commit
 archives. The backup config tar tolerates read failures, and the Mac pull script can
 finish successfully after an individual transfer failure. Verify contents and logs;
-neither exit status alone proves recoverability. The collector private key and
-Prometheus history are excluded. See [operations and recovery](../../docs/slim-operations.md).
+neither exit status alone proves recoverability. The collector private key at `/home/rtax/keys/id_ed25519` and Prometheus history
+are excluded. Key exclusion depends on its location outside the archived data and
+pinned directories; moving it into either would include it in backups. See [operations and recovery](../../docs/slim-operations.md).
 
 The screen-rotation helper is optional and specific to an inverted local monitor.
 It skips headless and xrdp sessions. This tree does not configure network renderers,

@@ -1,3 +1,21 @@
+# Unreleased — collector 1.6.2 and review corrections
+
+- Loop host-key/artifact hard stops now return **4** (`EXIT_HARD_STOP`). Ordinary
+  collection/CLI failures remain **1**; one-shot failures retain their existing
+  exit contract. Bad configuration is **2** and lock acquisition failures are **3**.
+- The matching systemd example uses `RestartPreventExitStatus=4 2`, retrying exits
+  1 and 3. Deploy this unit **together with 1.6.2**; both are pending deployment.
+  Slim still runs 1.6.0 with the owner's interim `RestartPreventExitStatus=1 2`.
+- Correct Pi-hole panel 8 to DNS request duration and legend `Pi-hole answer`,
+  matching the owner's reported 21:58 live change; no host was accessed here.
+- Validate each raw backup-list filename before local path use, preserving lines
+  without glob expansion; add offline traversal, download and retention tests.
+- Align the router placeholder and generic gateway labels, narrow durability and
+  commissioning-test claims, and record completed historical CI and Claude review.
+- Refresh deployment hashes and add a coverage/integrity test. Make the node
+  exporter's textfile directory explicit in the example; live verification remains
+  deferred because this change does not access Slim. Service hardening is deferred.
+
 # Unreleased — collector 1.6.1 storage correction
 
 - Sync the actual parent directory after an atomic write. Sample files live under
@@ -17,7 +35,7 @@
   with `interactive_auth: true`, exits 2 before any attempt. Password mode is
   unchanged and remains the default.
 - Key mode was deployed on Slim on 2026-10-17. The earlier Claude session reported
-  386 collector tests passing on Slim; later operator output showed the service
+  386 collector tests run on Slim; later operator output showed the service
   running and producing samples. This does not extend the 1.5.5 bench acceptance.
 - Added sanitized monitoring/exporter/dashboard/alert/service/backup examples and
   setup, operations and recovery documentation. Telegram delivery, controlled
