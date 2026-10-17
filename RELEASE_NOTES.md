@@ -1,3 +1,31 @@
+# Unreleased — collector 1.6.1 storage correction
+
+- Sync the actual parent directory after an atomic write. Sample files live under
+  `samples/`; syncing only the top-level data directory did not flush their renamed
+  directory entries. State and pruned outcomes still sync the top-level directory.
+- Added focused regression tests. Directory fsync remains best effort on systems
+  that reject it; this is not a guarantee against every crash or storage failure.
+- Gemini supplied the observation; Codex checked it against source and implemented
+  this correction. It has **not** been deployed to Slim, which still runs 1.6.0.
+
+# Unreleased — Slim deployment and collector 1.6.0
+
+- Optional public-key authentication for unattended collection: `identity_file` in
+  `config.json` or `--identity-file`. Exactly one pinned key is offered under
+  `BatchMode` (no password, agent or default keys, no terminal handover); a
+  missing, relative, non-regular or group/world-accessible key file, or one combined
+  with `interactive_auth: true`, exits 2 before any attempt. Password mode is
+  unchanged and remains the default.
+- Key mode was deployed on Slim on 2026-10-17. The earlier Claude session reported
+  386 collector tests passing on Slim; later operator output showed the service
+  running and producing samples. This does not extend the 1.5.5 bench acceptance.
+- Added sanitized monitoring/exporter/dashboard/alert/service/backup examples and
+  setup, operations and recovery documentation. Telegram delivery, controlled
+  reboot/endurance testing and restore validation remain pending.
+- See the [dated deployment record](docs/slim-deployment-20261017.md) for evidence
+  sources and limits. No new project release or tag is created by this branch.
+
+
 # v0.1.0 — Initial experimental release
 
 Component versions: collector **1.5.5**, reporter **1.0.5**, JSON schema

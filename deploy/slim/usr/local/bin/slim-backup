@@ -1,0 +1,61 @@
+#!/bin/bash
+# Nightly config backup for slim: Pi-hole (teleporter + config + query DB),
+# Grafana (DB + provisioning + dashboards), Prometheus/exporter config, custom
+# units/scripts, collector config. Prometheus metric history is NOT included.
+# Output: /var/backups/slim/slim-YYYYmmdd-HHMMSS.tar.gz (root:slim 0640), keeps 14.
+set -euo pipefail
+DEST=/var/backups/slim
+KEEP=14
+PROM=/var/lib/prometheus/node-exporter/slim_backup.prom
+stamp=$(date +%Y%m%d-%H%M%S)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/pihole" "$work/grafana" "$DEST"
+
+snap() {  # consistent copy of a live SQLite DB
+  python3 -I -c 'import sqlite3,sys
+s=sqlite3.connect(f"file:{sys.argv[1]}?mode=ro",uri=True); d=sqlite3.connect(sys.argv[2])
+s.backup(d); d.close(); s.close()' "$1" "$2"
+}
+
+(cd "$work/pihole" && pihole-FTL --teleporter >/dev/null)
+cp -p /etc/pihole/pihole.toml "$work/pihole/"
+snap /etc/pihole/pihole-FTL.db "$work/pihole/pihole-FTL.db"
+snap /var/lib/grafana/grafana.db "$work/grafana/grafana.db"
+
+dpkg --get-selections > "$work/dpkg-selections.txt"
+{ echo "host: $(hostname)  date: $(date -Is)"; uname -r; pihole version 2>/dev/null || true
+  grafana-server -v 2>/dev/null || true; prometheus --version 2>&1 | head -1; } > "$work/versions.txt"
+
+tar -C / --ignore-failed-read -czf "$work/files.tar.gz" \
+  etc/grafana var/lib/grafana/dashboards \
+  etc/prometheus etc/default/prometheus etc/default/prometheus-node-exporter \
+  etc/default/prometheus-blackbox-exporter \
+  etc/systemd/system/pihole-exporter.service \
+  etc/systemd/system/prometheus-blackbox-exporter.service.d \
+  etc/systemd/system/slim-backup.service etc/systemd/system/slim-backup.timer \
+  etc/systemd/system/rtax-collector.service etc/systemd/system/rtax-exporter.service \
+  usr/local/bin etc/pihole-exporter etc/ufw \
+  etc/apt/sources.list etc/apt/sources.list.d etc/apt/keyrings \
+  etc/lightdm/lightdm.conf.d etc/xdg/autostart/rotate-screen.desktop \
+  etc/sudoers.d/slim etc/ssh/sshd_config.d etc/default/grub etc/netplan \
+  home/rtax/pinned home/rtax/data home/slim/.ssh/authorized_keys 2>/dev/null || true
+
+out="$DEST/slim-$stamp.tar.gz"
+tar -C "$work" -czf "$out.part" pihole grafana files.tar.gz dpkg-selections.txt versions.txt
+chown root:slim "$out.part"; chmod 640 "$out.part"
+mv "$out.part" "$out"
+ls -1t "$DEST"/slim-*.tar.gz | tail -n +$((KEEP + 1)) | xargs -r rm -f
+
+size=$(stat -c %s "$out")
+tmp=$(mktemp "$PROM.XXXXXX")
+cat > "$tmp" <<M
+# HELP slim_backup_last_success_timestamp_seconds Unix time of the last successful backup
+# TYPE slim_backup_last_success_timestamp_seconds gauge
+slim_backup_last_success_timestamp_seconds $(date +%s)
+# HELP slim_backup_last_size_bytes Size of the last backup archive
+# TYPE slim_backup_last_size_bytes gauge
+slim_backup_last_size_bytes $size
+M
+chmod 644 "$tmp"; mv "$tmp" "$PROM"
+echo "backup ok: $out ($size bytes)"

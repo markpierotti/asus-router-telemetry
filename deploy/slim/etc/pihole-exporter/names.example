@@ -1,0 +1,5 @@
+# Documentation addresses only. Replace with your own client inventory.
+192.0.2.1 gateway
+192.0.2.10 slim
+192.0.2.20 asus-ap
+127.0.0.1 slim-local

@@ -1,0 +1,17 @@
+[Unit]
+Description=Prometheus exporter for the rtax router-telemetry collector (read-only)
+After=network.target
+
+[Service]
+User=rtax
+Group=rtax
+ExecStart=/usr/bin/python3 -I /usr/local/bin/rtax-exporter
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

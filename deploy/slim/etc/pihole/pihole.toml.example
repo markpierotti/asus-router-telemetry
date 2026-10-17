@@ -1,0 +1,4 @@
+[dns]
+upstreams = ["1.1.1.1", "9.9.9.9"]
+interface = "enp1s0"
+listeningMode = "LOCAL"

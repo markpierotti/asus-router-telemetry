@@ -1,3 +1,7 @@
+> Historical handoff from before Slim commissioning. For current status use the
+> [17 October deployment record](slim-deployment-20261017.md) and
+> [operations runbook](slim-operations.md).
+
 # Archived Hermes prompt: foreground monitoring trial
 
 This historical prompt has been completed and is retained for provenance. Do not

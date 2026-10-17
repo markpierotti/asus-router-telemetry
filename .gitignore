@@ -18,3 +18,14 @@ __pycache__/
 
 # Local coding-agent state and nested worktrees
 /.claude/
+
+# Private home-lab exports and recovery material
+/deploy/slim/private/
+*.tar.gz
+*.sqlite
+*.db
+*.db-wal
+*.db-shm
+id_ed25519*
+slim_backup
+telegram_token

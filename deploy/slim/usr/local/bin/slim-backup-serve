@@ -1,0 +1,15 @@
+#!/bin/sh
+# Forced command for the Mac's backup-pull key: read-only access to
+# /var/backups/slim. Accepts only "list" or "get slim-YYYYmmdd-HHMMSS.tar.gz".
+DIR=/var/backups/slim
+set -- $SSH_ORIGINAL_COMMAND
+case "$1" in
+  list) cd "$DIR" && ls -1 slim-*.tar.gz 2>/dev/null ;;
+  get)
+    case "$2" in
+      slim-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].tar.gz)
+        [ -f "$DIR/$2" ] && exec cat "$DIR/$2" ;;
+    esac
+    echo "no such backup" >&2; exit 1 ;;
+  *) echo "usage: list | get <name>" >&2; exit 1 ;;
+esac
