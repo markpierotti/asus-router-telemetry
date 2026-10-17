@@ -21,5 +21,6 @@
   "max_stderr_bytes": 262144,
   "watchdog_selftest": true,
   "watchdog_selftest_bound": 3,
-  "interactive_auth": null
+  "interactive_auth": null,
+  "identity_file": null
 }

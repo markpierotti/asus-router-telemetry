@@ -1,7 +1,8 @@
 # Portfolio and CV copy
 
-This copy describes collector 1.5.5 / reporter 1.0.5 and the supervised hardware
-results recorded on 2026-10-14. The MIT-licensed project is public at
+The bench copy below describes collector 1.5.5 / reporter 1.0.5 and the supervised
+hardware results recorded on 2026-10-14. The deployment addendum describes 1.6.0
+commissioning on 2026-10-17. The MIT-licensed project is public at
 [markpierotti/asus-router-telemetry](https://github.com/markpierotti/asus-router-telemetry),
 with an initial experimental [v0.1.0 release](https://github.com/markpierotti/asus-router-telemetry/releases/tag/v0.1.0).
 
@@ -40,15 +41,15 @@ Routine sampling makes no model calls. I performed the physical setup and
 authentication, defined acceptance criteria and challenged unsupported conclusions.
 Code and security review findings were reproduced and addressed through behavioral
 regression tests. The case study distinguishes these results from future work:
-unattended operation, AP/NAS roles and long-term reliability have not been established.
+the historical trial did not establish unattended operation, AP/NAS roles or long-term reliability. Later Slim deployment observations are documented separately below.
 
 ## Broader home-lab context
 
 I’m building a home networking and security lab to investigate device behavior,
 collection failures and traffic containment. ASUS Router Telemetry is the first
 completed component, supported by supervised hardware trials and automated
-regression tests. Linux-host integration, Project Limbo’s simulated IoT exercises,
-and detection/investigation workflows are planned next stages. A deployed SOC
+regression tests. Slim now hosts collection, DNS and monitoring. Project Limbo’s
+simulated IoT exercises and detection/investigation workflows remain planned. A deployed SOC
 remains future work. See the [roadmap](home-lab-roadmap.md).
 
 ## CV bullets
@@ -82,3 +83,16 @@ link-loss failures. They are separate supervised exercises, not continuous produ
 uptime. Steady CPU percentages describe overall router activity, not instrumentation
 overhead. Do not present the work as custom firmware, a deployed SOC, a complete
 security audit or proof that all failure paths are handled.
+
+## Deployment addendum (2026-10-17)
+
+I deployed the collector on a wired Ubuntu thin client with explicit SSH key
+verification, a dedicated service account and one-minute collection. Prometheus,
+custom exporters and Grafana connect router and DNS health to dashboards and 13
+alert rules. Private backup jobs create local archives and pull copies to my Mac.
+An operator check showed all eight checked services running and recent collection
+about four hours after startup. Telegram delivery, controlled reboot/endurance
+validation and a restore rehearsal remain pending.
+
+**Additional stack:** Ubuntu · systemd · Pi-hole · Prometheus · Grafana · SQLite.
+See the [deployment record](slim-deployment-20261017.md) before quoting these results.

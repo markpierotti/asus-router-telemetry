@@ -1,0 +1,31 @@
+[Unit]
+Description=ASUS RT-AX56U telemetry collector (key auth, 60s loop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rtax
+Group=rtax
+WorkingDirectory=/home/rtax/app/collector
+# -E -s: ignore PYTHON* env and user site (not -I: that drops the script dir from sys.path)
+ExecStart=/usr/bin/python3 -E -s collector.py collect --loop --interval 60 --data-dir /home/rtax/data
+# 130 = orderly stop on SIGTERM. Exit 1 in loop mode is a hard stop (host-key or
+# artifact gate), 2 a bad config, 3 another run holds the lock: never retry those.
+SuccessExitStatus=130
+Restart=on-failure
+RestartSec=60
+RestartPreventExitStatus=1 2 3
+TimeoutStopSec=60
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/rtax/data
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

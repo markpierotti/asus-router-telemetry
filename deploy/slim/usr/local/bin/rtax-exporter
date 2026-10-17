@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Read-only Prometheus exporter for the rtax router-telemetry collector.
+
+Reads the collector's own data directory (state.json, the sample state.json
+names, and the tail of outcomes.jsonl) on every scrape and serves metrics on
+127.0.0.1:9618/metrics. Runs as the collector's user; writes nothing. Standard
+library only.
+"""
+import json
+import os
+import time
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+DATA = "/home/rtax/data"
+LISTEN = ("127.0.0.1", 9618)
+OUTCOME_TAIL_BYTES = 4 << 20   # enough for well over 24h of one-minute attempts
+OUTCOMES = ("success", "malformed_data", "schema_invalid", "timeout", "reporter_failure",
+            "provisioning_failure", "control_master_lost", "ssh_auth_failure",
+            "ssh_hostkey_mismatch", "unreachable", "artifact_mismatch", "transport_error",
+            "output_overflow", "storage_error", "internal_error")
+
+
+def ts(iso):
+    try:
+        return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def esc(v):
+    return str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+
+def num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def collect():
+    lines = []
+
+    def metric(name, help_, samples, type_="gauge"):
+        samples = [(l, v) for l, v in samples if num(v)]
+        if not samples:
+            return
+        lines.append("# HELP %s %s" % (name, help_))
+        lines.append("# TYPE %s %s" % (name, type_))
+        for labels, value in samples:
+            lab = ",".join('%s="%s"' % (k, esc(v)) for k, v in labels.items())
+            lines.append("%s{%s} %s" % (name, lab, value) if lab else "%s %s" % (name, value))
+
+    ok = 1
+    try:
+        with open(os.path.join(DATA, "state.json")) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        state, ok = {}, 0
+
+    last = state.get("last_attempt") or {}
+    metric("rtax_last_attempt_timestamp_seconds", "Unix time of the last collection attempt",
+           [({}, ts(last.get("at")))])
+    metric("rtax_last_attempt_success", "1 if the last attempt succeeded",
+           [({}, 1 if last.get("outcome") == "success" else 0)] if last else [])
+    metric("rtax_last_attempt_duration_seconds", "Duration of the last attempt",
+           [({}, last.get("duration_s"))])
+    metric("rtax_last_attempt_cleanup_ok", "1 if the last attempt confirmed remote cleanup",
+           [({}, 1 if last.get("cleanup_ok") else 0)] if last else [])
+    metric("rtax_consecutive_failures", "Consecutive failed attempts",
+           [({}, state.get("consecutive_failures"))])
+    metric("rtax_incident_open", "1 while a collection incident is open",
+           [({}, 1 if state.get("incident") else 0)] if state else [])
+
+    # outcomes over the last 24h, from the tail of the append-only log
+    counts = {o: 0 for o in OUTCOMES}
+    since = time.time() - 86400
+    try:
+        path = os.path.join(DATA, "outcomes.jsonl")
+        with open(path, "rb") as fh:
+            fh.seek(max(0, os.path.getsize(path) - OUTCOME_TAIL_BYTES))
+            for raw in fh.read().splitlines():
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                t = ts(rec.get("at"))
+                if t and t >= since and rec.get("outcome") in counts:
+                    counts[rec["outcome"]] += 1
+    except OSError:
+        ok = 0
+    metric("rtax_attempts_24h", "Collection attempts in the last 24h by outcome",
+           [({"outcome": o}, n) for o, n in counts.items()])
+
+    sample = None
+    lvs = state.get("last_valid_sample") or {}
+    if lvs.get("path"):
+        try:
+            with open(lvs["path"]) as fh:
+                sample = json.load(fh)
+        except (OSError, ValueError):
+            ok = 0
+    if sample:
+        rep = sample.get("reporter") or {}
+        metric("rtax_last_sample_timestamp_seconds", "Unix time of the newest accepted sample",
+               [({}, ts(sample.get("collected_at")))])
+        host = rep.get("host") or {}
+        metric("rtax_router_uptime_seconds", "Router uptime", [({}, host.get("uptime_seconds"))])
+        metric("rtax_router_boot_time_seconds", "Router boot time (identity of this boot)",
+               [({}, host.get("boot_time"))])
+        cu = (sample.get("derived") or {}).get("cpu_utilisation") or {}
+        cpu = []
+        agg = cu.get("aggregate") or {}
+        if agg.get("state") == "ok":
+            cpu.append(({"cpu": "all"}, agg.get("util_percent")))
+        for name, c in sorted((cu.get("per_cpu") or {}).items()):
+            if (c or {}).get("state") == "ok":
+                cpu.append(({"cpu": name}, c.get("util_percent")))
+        metric("rtax_router_cpu_util_percent",
+               "Router CPU utilisation over the last interval (only when state=ok)", cpu)
+        la = rep.get("loadavg") or {}
+        metric("rtax_router_load", "Router load average",
+               [({"period": p}, la.get("load" + p)) for p in ("1", "5", "15")])
+        metric("rtax_router_procs", "Router processes",
+               [({"state": "running"}, la.get("procs_running")),
+                ({"state": "total"}, la.get("procs_total"))])
+        mem = rep.get("memory_kb") or {}
+        metric("rtax_router_memory_bytes", "Router memory",
+               [({"type": k}, mem[k] * 1024) for k in
+                ("MemTotal", "MemFree", "MemAvailable", "Cached", "Buffers") if num(mem.get(k))])
+        fss = [f for f in rep.get("filesystems") or [] if f.get("available")]
+        metric("rtax_router_fs_size_bytes", "Router filesystem size",
+               [({"path": f.get("path")}, f.get("total_bytes")) for f in fss])
+        metric("rtax_router_fs_avail_bytes", "Router filesystem space available",
+               [({"path": f.get("path")}, f.get("avail_bytes")) for f in fss])
+        metric("rtax_router_fs_used_percent", "Router filesystem used percent (df-compatible)",
+               [({"path": f.get("path")}, f.get("used_percent")) for f in fss])
+        metric("rtax_sample_info", "Versions in the newest sample (value is always 1)",
+               [({"collector": sample.get("collector_version"), "reporter": rep.get("version"),
+                  "kernel": host.get("release")}, 1)])
+    metric("rtax_exporter_up", "1 if state, outcomes and the newest sample were read",
+           [({}, ok)])
+    return "\n".join(lines) + "\n"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/metrics":
+            self.send_error(404)
+            return
+        body = collect().encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(LISTEN, Handler).serve_forever()

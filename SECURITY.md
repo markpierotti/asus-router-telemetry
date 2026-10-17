@@ -2,9 +2,10 @@
 
 ## Status and reporting
 
-This is an experimental userspace telemetry project. Collector 1.5.5 and reporter
-1.0.5 have supervised hardware evidence for the named ASUS bench configuration;
-the portable configuration has offline test evidence. This is not a production
+This is an experimental userspace telemetry project. Collector 1.6.0 adds explicit
+key authentication and has a recorded Slim commissioning observation. The older
+collector 1.5.5 / reporter 1.0.5 pair has supervised hardware evidence for its named
+ASUS bench configuration. See the dated deployment record for current limits. This is not a production
 support commitment or a certification of the router firmware.
 
 For a suspected vulnerability, use GitHub private vulnerability reporting through
@@ -18,7 +19,10 @@ minimal synthetic reproduction. No response-time guarantee is offered.
 The single-shot C reporter reads Linux telemetry and emits JSON. The external
 Python collector uses OpenSSH to upload and execute a temporary reporter, validate
 its response and retain local samples, outcomes and collection-incident state.
-No listener, unattended service or router firmware modification is included.
+The `deploy/slim` examples add unattended systemd operation, loopback HTTP metrics
+listeners, monitoring provisioning and private backup scripts. They require trusted
+operator configuration; they are not an automatic installer. No router firmware
+modification is included.
 
 Relevant assets are operator credentials, trusted host keys, executable identity,
 the collector host's files and terminal, device files, and retained evidence.
@@ -64,8 +68,13 @@ Pure correctness findings should still be reported, with security impact separat
 from numerical or operational impact. A passing test or short hardware trial does
 not waive a reachable issue.
 
-Unattended/key authentication, multi-hour reliability, host/router reboot recovery,
-AP/NAS roles and general whole-network visibility remain unvalidated. SSH master
+Key authentication and AP operation have deployment observations; controlled
+endurance/reboot acceptance, NAS performance, restore readiness and whole-network
+visibility remain unvalidated. Exporters read trusted local files and databases.
+Pi-hole metrics include DNS domains and client identities. Backup archives may
+contain secrets and household history and must stay private. A best-effort config
+archive and a backup-success metric do not establish completeness or recoverability.
+External Telegram delivery and an independent host-outage check remain pending. SSH master
 liveness checks describe a control socket, not independent process identity or
 router reachability. The pending-cleanup ledger records historical uncertainty;
 manual reconciliation does not erase it. Storage candidates are heuristics and
