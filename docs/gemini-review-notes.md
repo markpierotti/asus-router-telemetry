@@ -15,7 +15,7 @@ record, exhaustive audit or evidence of professional seniority.
 | Widen a reporter formatting buffer | Deferred to a separate reporter revision and build validation; the reporter and its accepted artifact remain unchanged |
 | Pin apt snapshot/package inputs | Deferred build reproducibility work; a base-image digest alone does not establish bit-for-bit rebuilds |
 | Add unattended authentication | Already implemented in 1.6.0 using explicit `identity_file`, with no password/agent fallback. No additional `auth_mode` is required for this contract |
-| Change systemd KillMode | Not adopted without a controlled stop/reboot trial. `KillMode=process` can leave child processes unmanaged; the commissioned unit remains the recorded example |
+| Change systemd KillMode | `KillMode=process` not adopted: it can leave child processes unmanaged. The example unit uses `KillMode=mixed` (SIGTERM to the collector only, then SIGKILL for leftovers) because the default also signalled the ssh control master and left a router work dir behind. One controlled mid-collection stop on Slim (18 October 2026) exited 130 with cleanup through the master; no reboot trial |
 | Router syslog, interface counters, discovery, IDS and segmentation | Recorded as future candidates, not installed capabilities |
 | Hardware upgrades and switch ownership | Not treated as verified inventory or purchase advice. One Slim is observed; a managed switch and second sensor NIC have not been confirmed |
 
