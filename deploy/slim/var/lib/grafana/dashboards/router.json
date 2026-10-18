@@ -1,842 +1,1068 @@
 {
- "title": "Router (ASUS RT-AX56U)",
- "uid": "router-asus",
- "tags": [
-  "router",
-  "home-lab"
- ],
- "timezone": "browser",
- "refresh": "1m",
- "time": {
-  "from": "now-6h",
-  "to": "now"
- },
- "schemaVersion": 39,
- "id": null,
- "panels": [
-  {
-   "id": 1,
-   "type": "stat",
-   "title": "Collector",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 0,
-    "w": 4,
-    "h": 4
-   },
-   "targets": [
+  "title": "Router (ASUS RT-AX56U)",
+  "uid": "router-asus",
+  "tags": [
+    "router",
+    "home-lab"
+  ],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "id": null,
+  "panels": [
     {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_last_attempt_success",
-     "instant": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "mappings": [
-      {
-       "type": "value",
-       "options": {
-        "0": {
-         "text": "FAILING",
-         "color": "red"
+      "id": 1,
+      "type": "stat",
+      "title": "Collector",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(vector(3) and on() ((min(up{job=\"router\"}) == 0) or (min(rtax_exporter_up) == 0))) or (vector(2) and on() (max(time() - rtax_last_attempt_timestamp_seconds) > 300)) or (vector(1) and on() ((max(rtax_last_attempt_success) == 0) or (max(rtax_incident_open) == 1))) or (vector(0) and on() (max(rtax_last_attempt_success) == 1)) or vector(3)",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "FAILING",
+                  "color": "red",
+                  "index": 1
+                },
+                "2": {
+                  "text": "STALE",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
+                  "text": "UNAVAILABLE",
+                  "color": "purple",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "purple",
+                "value": 3
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "NO DATA"
         },
-        "1": {
-         "text": "OK",
-         "color": "green"
-        }
-       }
-      }
-     ],
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "red",
-        "value": null
-       },
-       {
-        "color": "green",
-        "value": 1
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    },
-    "colorMode": "value",
-    "graphMode": "none"
-   },
-   "description": "Outcome of the collector's last attempt (systemd rtax-collector, key auth, every 60s)."
-  },
-  {
-   "id": 2,
-   "type": "stat",
-   "title": "Last collection",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 4,
-    "y": 0,
-    "w": 4,
-    "h": 4
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "time() - rtax_last_attempt_timestamp_seconds",
-     "instant": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "s",
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "orange",
-        "value": 180
-       },
-       {
-        "color": "red",
-        "value": 300
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     },
-     "decimals": 0
-    },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    },
-    "colorMode": "value",
-    "graphMode": "none"
-   },
-   "description": "Seconds since the last attempt; over 5 min means the collector has stopped."
-  },
-  {
-   "id": 3,
-   "type": "stat",
-   "title": "Router uptime",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 8,
-    "y": 0,
-    "w": 4,
-    "h": 4
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_uptime_seconds",
-     "instant": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "dtdurations",
-     "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    },
-    "colorMode": "value",
-    "graphMode": "none"
-   }
-  },
-  {
-   "id": 4,
-   "type": "stat",
-   "title": "Router CPU",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 12,
-    "y": 0,
-    "w": 4,
-    "h": 4
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_cpu_util_percent{cpu=\"all\"}"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percent",
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "orange",
-        "value": 50
-       },
-       {
-        "color": "red",
-        "value": 80
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     },
-     "decimals": 1
-    },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    },
-    "colorMode": "value",
-    "graphMode": "area"
-   }
-  },
-  {
-   "id": 5,
-   "type": "stat",
-   "title": "Router memory available",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 16,
-    "y": 0,
-    "w": 4,
-    "h": 4
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "100 * rtax_router_memory_bytes{type=\"MemAvailable\"} / ignoring(type) rtax_router_memory_bytes{type=\"MemTotal\"}"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percent",
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "red",
-        "value": null
-       },
-       {
-        "color": "orange",
-        "value": 15
-       },
-       {
-        "color": "green",
-        "value": 30
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     },
-     "decimals": 0
-    },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    },
-    "colorMode": "value",
-    "graphMode": "area"
-   }
-  },
-  {
-   "id": 6,
-   "type": "stat",
-   "title": "Collection incident",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 20,
-    "y": 0,
-    "w": 4,
-    "h": 4
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_incident_open",
-     "instant": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "mappings": [
-      {
-       "type": "value",
-       "options": {
-        "0": {
-         "text": "none",
-         "color": "green"
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "1": {
-         "text": "OPEN",
-         "color": "red"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto"
+      },
+      "description": "OK = last attempt succeeded and is fresh. FAILING = last attempt failed or an incident is open. STALE = no attempt for more than 5 minutes. UNAVAILABLE = the router exporter is down or reporting nothing. (systemd rtax-collector, key auth, every 60s.)"
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Last collection",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(time() - rtax_last_attempt_timestamp_seconds) and on() (up{job=\"router\"} == 1)",
+          "instant": true,
+          "range": false
         }
-       }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 180
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto"
+      },
+      "description": "Seconds since the last attempt; over 5 min means the collector has stopped."
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Router uptime",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_uptime_seconds) and on() (up{job=\"router\"} == 1) and on() (rtax_exporter_up == 1) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto"
       }
-     ],
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    },
-    "colorMode": "value",
-    "graphMode": "none"
-   },
-   "description": "Opens after 3 failed attempts, resolves after 2 successes."
-  },
-  {
-   "id": 7,
-   "type": "timeseries",
-   "title": "Router CPU utilisation",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 4,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_cpu_util_percent{cpu=\"all\"}",
-     "legendFormat": "all cores"
     },
     {
-     "refId": "B",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_cpu_util_percent{cpu!=\"all\"}",
-     "legendFormat": "{{cpu}}"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percent",
-     "min": 0,
-     "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 5
-     }
-    },
-    "overrides": [
-     {
-      "matcher": {
-       "id": "byName",
-       "options": "all cores"
+      "id": 4,
+      "type": "stat",
+      "title": "Router CPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
-      "properties": [
-       {
-        "id": "custom.lineWidth",
-        "value": 3
-       },
-       {
-        "id": "custom.fillOpacity",
-        "value": 15
-       }
-      ]
-     }
-    ]
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 8,
-   "type": "timeseries",
-   "title": "Router load average",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 12,
-    "y": 4,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_load",
-     "legendFormat": "{{period}}-min"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "min": 0,
-     "decimals": 2,
-     "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 0
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   },
-   "description": "Runnable-process average. Not CPU utilisation: this router idles near 2 with CPUs ~99% idle."
-  },
-  {
-   "id": 9,
-   "type": "timeseries",
-   "title": "Router memory",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 12,
-    "w": 10,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_memory_bytes{type=\"MemAvailable\"}",
-     "legendFormat": "available"
-    },
-    {
-     "refId": "B",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_memory_bytes{type=\"MemFree\"}",
-     "legendFormat": "free"
-    },
-    {
-     "refId": "C",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_memory_bytes{type=\"MemTotal\"}",
-     "legendFormat": "total"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "bytes",
-     "min": 0,
-     "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 5
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 10,
-   "type": "bargauge",
-   "title": "Router storage used",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 10,
-    "y": 12,
-    "w": 6,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_fs_used_percent{path!=\"/\"}",
-     "legendFormat": "{{path}}",
-     "instant": true
-    },
-    {
-     "refId": "B",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_router_fs_used_percent{path=\"/\"}",
-     "legendFormat": "/ (firmware, read-only)",
-     "instant": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percent",
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "orange",
-        "value": 80
-       },
-       {
-        "color": "red",
-        "value": 95
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     },
-     "min": 0,
-     "max": 100
-    },
-    "overrides": []
-   },
-   "options": {
-    "orientation": "horizontal",
-    "displayMode": "gradient",
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    }
-   },
-   "description": "/ is the squashfs firmware image: always nearly full, not a problem. /jffs is persistent settings storage."
-  },
-  {
-   "id": 11,
-   "type": "timeseries",
-   "title": "ASUS ping from slim",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 16,
-    "y": 12,
-    "w": 8,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "probe_duration_seconds{job=\"ping\",instance=\"192.0.2.20\"}",
-     "legendFormat": "ping"
-    },
-    {
-     "refId": "B",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "probe_duration_seconds{job=\"tcp\",instance=\"192.0.2.20:22\"}",
-     "legendFormat": "ssh connect"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "s",
-     "min": 0,
-     "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 5
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 12,
-   "type": "bargauge",
-   "title": "Collection attempts, last 24h",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 20,
-    "w": 10,
-    "h": 7
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_attempts_24h > 0",
-     "legendFormat": "{{outcome}}",
-     "instant": true
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "blue",
-        "value": null
-       }
-      ]
-     },
-     "color": {
-      "mode": "thresholds"
-     }
-    },
-    "overrides": [
-     {
-      "matcher": {
-       "id": "byName",
-       "options": "success"
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
       },
-      "properties": [
-       {
-        "id": "color",
-        "value": {
-         "mode": "fixed",
-         "fixedColor": "green"
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_cpu_util_percent{cpu=\"all\"}) and on() (up{job=\"router\"} == 1) and on() (rtax_exporter_up == 1) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "instant": true,
+          "range": false
         }
-       }
-      ]
-     },
-     {
-      "matcher": {
-       "id": "byRegexp",
-       "options": "^(?!success$).*"
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA"
+        },
+        "overrides": []
       },
-      "properties": [
-       {
-        "id": "color",
-        "value": {
-         "mode": "fixed",
-         "fixedColor": "red"
-        }
-       }
-      ]
-     }
-    ]
-   },
-   "options": {
-    "orientation": "horizontal",
-    "displayMode": "basic",
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ]
-    }
-   }
-  },
-  {
-   "id": 13,
-   "type": "timeseries",
-   "title": "Collection duration",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 10,
-    "y": 20,
-    "w": 14,
-    "h": 7
-   },
-   "targets": [
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto"
+      },
+      "description": "Shows NO DATA when the newest router sample is more than 5 minutes old."
+    },
     {
-     "refId": "A",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "rtax_last_attempt_duration_seconds",
-     "legendFormat": "attempt"
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "s",
-     "min": 0,
-     "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 10,
-      "drawStyle": "points",
-      "pointSize": 4
-     }
+      "id": 5,
+      "type": "stat",
+      "title": "Router memory available",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(100 * rtax_router_memory_bytes{type=\"MemAvailable\"} / ignoring(type) rtax_router_memory_bytes{type=\"MemTotal\"}) and on() (up{job=\"router\"} == 1) and on() (rtax_exporter_up == 1) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 15
+              },
+              {
+                "color": "green",
+                "value": 30
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto"
+      },
+      "description": "Shows NO DATA when the newest router sample is more than 5 minutes old."
     },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Collection incident",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_incident_open) and on() (up{job=\"router\"} == 1) and on() (rtax_exporter_up == 1)",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "none",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "OPEN",
+                  "color": "red"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "NO DATA"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto"
+      },
+      "description": "Opens after 3 failed attempts, resolves after 2 successes."
     },
-    "tooltip": {
-     "mode": "multi"
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Router CPU utilisation",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_cpu_util_percent{cpu=\"all\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "all cores",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_cpu_util_percent{cpu!=\"all\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "{{cpu}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "all cores"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transparent": true
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Router load average",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_load) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "{{period}}-min",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 2,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Runnable-process average. Not CPU utilisation: this router idles near 2 with CPUs ~99% idle.",
+      "transparent": true
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Router memory",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_memory_bytes{type=\"MemAvailable\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "available",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_memory_bytes{type=\"MemFree\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "free",
+          "range": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_memory_bytes{type=\"MemTotal\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "total",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transparent": true
+    },
+    {
+      "id": 10,
+      "type": "bargauge",
+      "title": "Router storage used",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 12,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_fs_used_percent{path!=\"/\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "{{path}}",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_router_fs_used_percent{path=\"/\"}) and on() ((time() - rtax_last_sample_timestamp_seconds) < 300)",
+          "legendFormat": "/ (firmware, read-only)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "valueMode": "color",
+        "showUnfilled": true,
+        "minVizHeight": 12
+      },
+      "description": "/ is the squashfs firmware image: always nearly full, not a problem. /jffs is persistent settings storage.",
+      "transparent": true
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "ASUS ping from slim",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 12,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "probe_duration_seconds{job=\"ping\",instance=\"192.0.2.20\"}",
+          "legendFormat": "ping",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "probe_duration_seconds{job=\"tcp\",instance=\"192.0.2.20:22\"}",
+          "legendFormat": "ssh connect",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transparent": true
+    },
+    {
+      "id": 12,
+      "type": "bargauge",
+      "title": "Collection attempts, last 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 10,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rtax_attempts_24h > 0",
+          "legendFormat": "{{outcome}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "success"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(?!success$).*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "valueMode": "color",
+        "showUnfilled": true,
+        "minVizHeight": 12
+      },
+      "transparent": true
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Collection duration",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 20,
+        "w": 14,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(rtax_last_attempt_duration_seconds) and on() ((time() - rtax_last_attempt_timestamp_seconds) < 300)",
+          "legendFormat": "attempt",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "points",
+            "pointSize": 4,
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "About 0.2s while the SSH connection is reused; ~5s when a new session is set up.",
+      "transparent": true
     }
-   },
-   "description": "About 0.2s while the SSH connection is reused; ~5s when a new session is set up."
-  }
- ]
+  ],
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [
+        "home-lab"
+      ],
+      "targetBlank": false,
+      "title": "Home lab",
+      "type": "dashboards"
+    }
+  ]
 }

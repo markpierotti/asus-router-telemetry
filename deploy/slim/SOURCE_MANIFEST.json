@@ -30,7 +30,7 @@
     "vendor firmware and compiled reporter"
   ],
   "published_file_sha256": {
-    "README.md": "c9736e880283984cdef00063798c37107446633cb490cb8f44e53616c5aec096",
+    "README.md": "ecd32282dfd98d5098dc7edce9902acbe8ca84991880f8bce7a16d7bf362ff20",
     "etc/default/prometheus": "903d2b1a5c3b48dabac1704e514e2becb63f56d9ccc3ddc48bd3bf67252efb26",
     "etc/default/prometheus-blackbox-exporter": "361acfd80f0db9e302edd1d0ec6d01cbd7d4d712772b77333e8eb19329d6ba5a",
     "etc/default/prometheus-node-exporter": "4afa09e75e2b554c9ff3547f263cefcd4af765cde02d85add6d8882509d6f803",
@@ -38,8 +38,8 @@
     "etc/grafana/provisioning/alerting/slim-rules.yaml": "7bd0bf465af39579e0a3240f6290b7dbdb921efb470f0007343563405097b846",
     "etc/grafana/provisioning/dashboards/slim.yaml": "c630db4eb2392163fe77b78980b486566564711cee8cf724981f9f2cd8168046",
     "etc/grafana/provisioning/datasources/prometheus.yaml": "d1e7c59ffa370e616c798288bc8373a0129aa947120517853181dd94acfb5e41",
-    "etc/pihole/pihole.toml.example": "267e10850f48a6aee965beb3c12c86de4592ce75cce8c307c3ce837994adc14e",
     "etc/pihole-exporter/names.example": "93ba8e633afa2467c0fb84bd94cb24d218441c649eb6f678579d406777670092",
+    "etc/pihole/pihole.toml.example": "267e10850f48a6aee965beb3c12c86de4592ce75cce8c307c3ce837994adc14e",
     "etc/prometheus/blackbox.yml": "9bb53ae15b86c414571f453131862192068e598d101d103a980306ed226ff5fd",
     "etc/prometheus/prometheus.yml": "ddfa04f4b87d8be27e92a5fe44e0e4c42f2150d6297a9e4bfa3f744266c47dfc",
     "etc/systemd/system/pihole-exporter.service": "f12ef52c7cab8e5240c46dac61ecedd2324a74300bc7931450109521502f366d",
@@ -51,6 +51,7 @@
     "macos/local.homelab.pull-slim-backups.plist.example": "b5372683c3f54d60f4c4d57ef90dc5bb87099bc7d5680be44b7f4406b5132d15",
     "macos/pull-slim-backups": "99e3ad75cd6eb051b610223b37bd429455aa4911667f240caa7c3d84b401752d",
     "tests/test_backup_pull.py": "fcfdb58f9d46fe4a8fcc3f88999a9d5f1e427f9e005e47d4caa610eaa7abd87b",
+    "tests/test_dashboards.py": "4a3ea8175156918dce0032cfb5277b07c6233f526a4ff198ba9992eab5dd77e8",
     "tests/test_exporters.py": "b6e3d9bd6f51ee24d648e4c0ba330498b598291b2ad4828b2ee89d71e8a24eb3",
     "tests/test_source_manifest.py": "b2989ae542d0144e3891f54dbfd2eb89e5a6731177bc8e3cf6a1094f0c1019ca",
     "usr/local/bin/pihole-exporter": "6ab8f7e25d1812fed43e75dc4a9da238f7590180482cf6992942be8c0823307b",
@@ -58,8 +59,8 @@
     "usr/local/bin/rtax-exporter": "f5c249672fa0d8992c3e6fa1d77b7eb939acef854aa88de85022ec5e52f777c1",
     "usr/local/bin/slim-backup": "a47f55a5e11cc6bb8b4863d27276729d01c91b6d554e1aa5fa4938a57b51c9da",
     "usr/local/bin/slim-backup-serve": "bc9f0d6fa5c7a45542b96c484aab5bf2798a5e78930c1a27c03b6a42e591938b",
-    "var/lib/grafana/dashboards/pihole.json": "617f09847cecde24e1950b49212102faa37a364e6b67650b6ae6de1c0683a552",
-    "var/lib/grafana/dashboards/router.json": "f80410bc87084b6dace4be451dacec838dd78f33c8824f4e6ad5b33b5ab13817",
-    "var/lib/grafana/dashboards/slim-overview.json": "c0ba1b449f324723b69eb403a49be0c2d3cf93f6f66c5944cd87364e965f1756"
+    "var/lib/grafana/dashboards/pihole.json": "e1e88e722e40b44d7893fed4342710d9e143056eefb05cd0d109cc786ba5d254",
+    "var/lib/grafana/dashboards/router.json": "358a8ecb0646f6d3a3be0bd8aa05fc823fdb61e9fef50ce842203961f4e1a701",
+    "var/lib/grafana/dashboards/slim-overview.json": "be4511290ac49a4d2c7460727bb98886e59fe07c2dbb4abfdf1c16e5ed37b70d"
   }
 }

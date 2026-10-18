@@ -2,7 +2,7 @@
   "uid": "slim-overview",
   "title": "Slim overview",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "style": "dark",
@@ -22,6 +22,20 @@
   "annotations": {
     "list": []
   },
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [
+        "home-lab"
+      ],
+      "targetBlank": false,
+      "title": "Home lab",
+      "type": "dashboards"
+    }
+  ],
   "panels": [
     {
       "id": 1,
@@ -43,9 +57,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 - avg(rate(node_cpu_seconds_total{job=\"node\",mode=\"idle\"}[2m])) * 100",
+          "expr": "(sum(rate(node_cpu_seconds_total{job=\"node\",mode!=\"idle\"}[2m])) / sum(rate(node_cpu_seconds_total{job=\"node\"}[2m])) * 100) and on() (up{job=\"node\"} == 1)",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -71,10 +87,23 @@
               }
             ]
           },
-          "mappings": [],
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA",
           "min": 0,
           "max": 100,
-          "decimals": 0
+          "decimals": 1
         },
         "overrides": []
       },
@@ -87,11 +116,12 @@
           "values": false
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
-      }
+      },
+      "description": "Busy share of total CPU time across all cores (non-idle / all modes). Same basis as the CPU by mode chart, so the stacked total equals this tile."
     },
     {
       "id": 2,
@@ -113,9 +143,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 * (1 - node_memory_MemAvailable_bytes{job=\"node\"} / node_memory_MemTotal_bytes{job=\"node\"})",
+          "expr": "(100 * (1 - node_memory_MemAvailable_bytes{job=\"node\"} / node_memory_MemTotal_bytes{job=\"node\"})) and on() (up{job=\"node\"} == 1)",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -141,7 +173,20 @@
               }
             ]
           },
-          "mappings": [],
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA",
           "min": 0,
           "max": 100,
           "decimals": 0
@@ -157,7 +202,7 @@
           "values": false
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
@@ -183,9 +228,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 - 100 * node_filesystem_avail_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"} / node_filesystem_size_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"}",
+          "expr": "(100 * (node_filesystem_size_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"} - node_filesystem_free_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"}) / ((node_filesystem_size_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"} - node_filesystem_free_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"}) + node_filesystem_avail_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|rootfs|overlay\"})) and on() (up{job=\"node\"} == 1)",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -211,10 +258,23 @@
               }
             ]
           },
-          "mappings": [],
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA",
           "min": 0,
           "max": 100,
-          "decimals": 0
+          "decimals": 1
         },
         "overrides": []
       },
@@ -231,7 +291,8 @@
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
-      }
+      },
+      "description": "Root filesystem Use%, computed the way df does: used / (used + space available to non-root users). df rounds this up to a whole number."
     },
     {
       "id": 4,
@@ -253,9 +314,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "time() - node_boot_time_seconds{job=\"node\"}",
+          "expr": "(time() - node_boot_time_seconds{job=\"node\"}) and on() (up{job=\"node\"} == 1)",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -273,7 +336,20 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -314,7 +390,9 @@
           },
           "expr": "probe_success{job=\"dns_pihole\"}",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -342,15 +420,29 @@
               "options": {
                 "0": {
                   "text": "DOWN",
-                  "color": "red"
+                  "color": "red",
+                  "index": 0
                 },
                 "1": {
                   "text": "UP",
-                  "color": "green"
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
                 }
               }
             }
-          ]
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -363,11 +455,12 @@
           "values": false
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
-      }
+      },
+      "description": "Blackbox DNS probe against Pi-hole. NO DATA means the probe is not reporting."
     },
     {
       "id": 6,
@@ -389,9 +482,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pihole_blocked_ratio_24h",
+          "expr": "pihole_blocked_ratio_24h and on() (up{job=\"pihole\"} == 1) and on() (pihole_exporter_up == 1)",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -409,7 +504,20 @@
               }
             ]
           },
-          "mappings": [],
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA",
           "decimals": 1
         },
         "overrides": []
@@ -423,11 +531,12 @@
           "values": false
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
-      }
+      },
+      "description": "Share of DNS queries blocked in the last 24h. NO DATA if the Pi-hole exporter is down."
     },
     {
       "id": 7,
@@ -449,9 +558,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "probe_success{job=\"ping\",instance=\"1.1.1.1\"}",
+          "expr": "max(probe_success{job=\"http\"} or probe_success{job=\"ping\",instance=\"1.1.1.1\"})",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -479,15 +590,29 @@
               "options": {
                 "0": {
                   "text": "DOWN",
-                  "color": "red"
+                  "color": "red",
+                  "index": 0
                 },
                 "1": {
                   "text": "UP",
-                  "color": "green"
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
                 }
               }
             }
-          ]
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -500,11 +625,12 @@
           "values": false
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
-      }
+      },
+      "description": "UP if either the HTTPS probes or the 1.1.1.1 ping succeed (same rule as the Internet down alert)."
     },
     {
       "id": 8,
@@ -526,9 +652,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rtax_last_attempt_success",
+          "expr": "(vector(3) and on() ((min(up{job=\"router\"}) == 0) or (min(rtax_exporter_up) == 0))) or (vector(2) and on() (max(time() - rtax_last_attempt_timestamp_seconds) > 300)) or (vector(1) and on() ((max(rtax_last_attempt_success) == 0) or (max(rtax_incident_open) == 1))) or (vector(0) and on() (max(rtax_last_attempt_success) == 1)) or vector(3)",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -541,12 +669,20 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "green",
+                "color": "red",
                 "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "purple",
+                "value": 3
               }
             ]
           },
@@ -555,16 +691,40 @@
               "type": "value",
               "options": {
                 "0": {
-                  "text": "FAILING",
-                  "color": "red"
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
                 },
                 "1": {
-                  "text": "OK",
-                  "color": "green"
+                  "text": "FAILING",
+                  "color": "red",
+                  "index": 1
+                },
+                "2": {
+                  "text": "STALE",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
+                  "text": "UNAVAILABLE",
+                  "color": "purple",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "NO DATA",
+                  "color": "red",
+                  "index": 99
                 }
               }
             }
-          ]
+          ],
+          "noValue": "NO DATA"
         },
         "overrides": []
       },
@@ -577,11 +737,12 @@
           "values": false
         },
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value",
         "orientation": "auto"
-      }
+      },
+      "description": "OK = last attempt succeeded and is fresh. FAILING = last attempt failed or an incident is open. STALE = no attempt for more than 5 minutes. UNAVAILABLE = the router exporter is down or reporting nothing."
     },
     {
       "id": 9,
@@ -604,9 +765,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (mode) (rate(node_cpu_seconds_total{job=\"node\",mode!=\"idle\"}[2m])) * 100",
+          "expr": "sum by (mode) (rate(node_cpu_seconds_total{job=\"node\",mode!=\"idle\"}[2m])) / on() group_left sum(rate(node_cpu_seconds_total{job=\"node\"}[2m])) * 100",
           "legendFormat": "{{mode}}",
-          "refId": "A"
+          "refId": "A",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -622,7 +784,7 @@
             "fillOpacity": 25,
             "gradientMode": "opacity",
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "mode": "normal",
               "group": "A"
@@ -668,7 +830,8 @@
           },
           "expr": "node_memory_MemTotal_bytes{job=\"node\"} - node_memory_MemAvailable_bytes{job=\"node\"}",
           "legendFormat": "used",
-          "refId": "A"
+          "refId": "A",
+          "range": true
         },
         {
           "datasource": {
@@ -677,7 +840,8 @@
           },
           "expr": "node_memory_Cached_bytes{job=\"node\"}",
           "legendFormat": "page cache",
-          "refId": "B"
+          "refId": "B",
+          "range": true
         },
         {
           "datasource": {
@@ -686,7 +850,8 @@
           },
           "expr": "node_memory_SwapTotal_bytes{job=\"node\"} - node_memory_SwapFree_bytes{job=\"node\"}",
           "legendFormat": "swap used",
-          "refId": "C"
+          "refId": "C",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -702,7 +867,7 @@
             "fillOpacity": 25,
             "gradientMode": "opacity",
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "mode": "none",
               "group": "A"
@@ -747,7 +912,8 @@
           },
           "expr": "sum(rate(node_network_receive_bytes_total{job=\"node\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*\"}[2m])) * 8",
           "legendFormat": "download",
-          "refId": "A"
+          "refId": "A",
+          "range": true
         },
         {
           "datasource": {
@@ -756,7 +922,8 @@
           },
           "expr": "sum(rate(node_network_transmit_bytes_total{job=\"node\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*\"}[2m])) * 8",
           "legendFormat": "upload",
-          "refId": "B"
+          "refId": "B",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -772,7 +939,7 @@
             "fillOpacity": 25,
             "gradientMode": "opacity",
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "mode": "none",
               "group": "A"
@@ -817,7 +984,8 @@
           },
           "expr": "rate(pihole_query_id_max[5m]) * 60",
           "legendFormat": "queries",
-          "refId": "A"
+          "refId": "A",
+          "range": true
         },
         {
           "datasource": {
@@ -826,7 +994,8 @@
           },
           "expr": "pihole_blocked_5m / 5",
           "legendFormat": "blocked",
-          "refId": "B"
+          "refId": "B",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -842,7 +1011,7 @@
             "fillOpacity": 25,
             "gradientMode": "opacity",
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "mode": "none",
               "group": "A"
@@ -903,7 +1072,8 @@
           },
           "expr": "probe_duration_seconds{job=\"ping\",instance=\"1.1.1.1\"}",
           "legendFormat": "internet 1.1.1.1",
-          "refId": "A"
+          "refId": "A",
+          "range": true
         },
         {
           "datasource": {
@@ -912,7 +1082,8 @@
           },
           "expr": "probe_duration_seconds{job=\"ping\",instance!=\"1.1.1.1\"}",
           "legendFormat": "LAN {{instance}}",
-          "refId": "B"
+          "refId": "B",
+          "range": true
         },
         {
           "datasource": {
@@ -921,7 +1092,8 @@
           },
           "expr": "probe_dns_duration_seconds{job=\"dns_pihole\",phase=\"request\"}",
           "legendFormat": "Pi-hole DNS",
-          "refId": "C"
+          "refId": "C",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -937,7 +1109,7 @@
             "fillOpacity": 15,
             "gradientMode": "opacity",
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "mode": "none",
               "group": "A"
@@ -982,7 +1154,8 @@
           },
           "expr": "sum(rate(node_disk_read_bytes_total{job=\"node\"}[2m]))",
           "legendFormat": "read",
-          "refId": "A"
+          "refId": "A",
+          "range": true
         },
         {
           "datasource": {
@@ -991,7 +1164,8 @@
           },
           "expr": "sum(rate(node_disk_written_bytes_total{job=\"node\"}[2m]))",
           "legendFormat": "write",
-          "refId": "B"
+          "refId": "B",
+          "range": true
         }
       ],
       "fieldConfig": {
@@ -1007,7 +1181,7 @@
             "fillOpacity": 25,
             "gradientMode": "opacity",
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "mode": "none",
               "group": "A"
