@@ -35,7 +35,7 @@ the model is called only for chat, alert follow-ups and one morning digest.
 
 | Job | Trigger | Model |
 | --- | --- | --- |
-| `asus-log-watch` (`scripts/asus-logwatch.py`) | Hermes cron, every minute, `--no-agent` | none |
+| `asus-log-watch` (`scripts/asus-logwatch.py`) | Hermes cron, `* * * * *` (every wall-clock minute), `--no-agent` | none |
 | `morning-digest` (`scripts/slim-snapshot.py` as context) | Hermes cron, 08:00 | one call |
 | Alert follow-up (`scripts/grafana-alert.py` transform) | Grafana webhook | newly firing alerts, and alerts still firing at Grafana's 4-hour repeat |
 
@@ -159,12 +159,64 @@ Live observations, each script running under its normal identity:
   and 20:52:41 completed. Its state file was updated at 20:50:44 and follows the
   current log inode. No new events were derived, the no-`slim_ip` notice is not set,
   and the gateway journal showed no errors after the install.
-- Observed cadence: although the job is configured `every 1m`, its recorded runs
-  (20:38:41 to 20:52:41) are 2 minutes apart. This was not investigated or changed.
+- Observed cadence: although the job was configured `every 1m`, its recorded runs
+  (20:38:41 to 20:52:41) were 2 minutes apart. Corrected at 21:09; see the next
+  section.
 
 These observations cover one short window. They are not outage, endurance or
 reboot acceptance and establish no general reliability claim; the limits under
 "Not exercised" above still apply.
+
+## Watcher cadence fix (2026-10-18 21:09 AEST)
+
+Cause (read from the installed Hermes source; the separate diagnosis has the file
+references): an `every 1m` interval is due one minute after the previous run
+*completes*, and Hermes' built-in scheduler checks for due jobs only every 60 s.
+Each run finished about 3 s after a tick, so the next tick came just before the job
+was due and it ran on the tick after that, every 120 s. A cron expression is due at
+the next wall-clock minute instead.
+
+Change: the existing job `asus-log-watch` (`088668929e5b`) was edited with the
+supported CLI, without restarting the gateway:
+
+```sh
+sudo -n -u hermes -H /home/hermes/.local/bin/hermes cron edit 088668929e5b --schedule '* * * * *'
+```
+
+Before: `{"kind": "interval", "minutes": 1, "display": "every 1m"}`. After:
+`{"kind": "cron", "expr": "* * * * *", "display": "* * * * *"}`. A field-by-field
+comparison with the backup showed only `schedule` and `schedule_display` changed
+(plus the runtime `next_run_at`). The script (`asus-logwatch.py`), `no_agent: true`,
+`enabled` and the delivery settings are unchanged. The other job (`morning-digest`)
+is unchanged, and there is still exactly one watcher job.
+
+Backup (private; root:root 0700 directory, file kept at hermes:hermes 0600):
+`/var/backups/slim-manual/20261018-210910-watcher-cadence/jobs.json`.
+
+Observed from Hermes' execution records, normal scheduled runs only (no manual
+runs):
+
+| Scheduled | Started | Finished | Duration | Gap since previous start | Status |
+| --- | --- | --- | --- | --- | --- |
+| 21:10:00 | 21:10:44.470 | 21:10:44.923 | 0.454 s | 120.040 s (last interval-era gap) | completed |
+| 21:11:00 | 21:11:44.446 | 21:11:44.905 | 0.460 s | 59.976 s | completed |
+| 21:12:00 | 21:12:44.505 | 21:12:44.932 | 0.427 s | 60.059 s | completed |
+| 21:13:00 | 21:13:44.490 | 21:13:44.924 | 0.434 s | 59.985 s | completed |
+| 21:14:00 | 21:14:44.464 | 21:14:44.929 | 0.465 s | 59.974 s | completed |
+| 21:15:00 | 21:15:44.474 | 21:15:44.918 | 0.444 s | 60.010 s | completed |
+| 21:16:00 | 21:16:44.462 | 21:16:44.914 | 0.452 s | 59.987 s | completed |
+
+- After the change, six consecutive gaps were 59.974–60.059 s. Before it, nine gaps
+  from 20:52 to 21:08 were 119.921–120.098 s.
+- No run overlapped the previous one and none failed or recorded an error. Every
+  delivery outcome was `suppressed`, the normal result when the watcher has nothing
+  to report. The gateway journal showed no errors after the edit.
+- Runs start about 44 s after the scheduled minute. That is the phase of Hermes'
+  60 s tick, not a delay in the watcher; the cron expression does not promise
+  starts on the exact minute.
+
+These are observations over one short, lightly loaded window, not a timing
+guarantee or outage/endurance acceptance.
 
 ## Rollback
 
@@ -174,6 +226,10 @@ config, and `*-hermes-harden` holds the former user unit. To drop only the sandb
 remove the drop-in and `systemctl daemon-reload && systemctl restart hermes-gateway`.
 To undo `1d2eb7f` on Slim, copy the two files back from
 `*-codex-rereview` with `cp -a`, which keeps their ownership and modes.
+To undo the cadence fix, use the same supported edit:
+`sudo -n -u hermes -H /home/hermes/.local/bin/hermes cron edit 088668929e5b --schedule 'every 1m'`.
+Do not copy the `*-watcher-cadence` backup over the live `jobs.json`, because that
+would overwrite newer scheduler state; the backup is evidence and a last resort.
 To remove Hermes: restore the two Grafana files and restart Grafana, then
 `sudo hermes gateway uninstall --system`, `loginctl disable-linger hermes`, and
 delete the account.
