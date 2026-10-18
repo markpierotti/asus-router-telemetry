@@ -69,13 +69,18 @@ def append_bounded(path, records):
     os.replace(tmp, path)
 
 
-def read_chunk(path, off):
-    """Read whole lines from off, at most MAX_BYTES. Returns (bytes, new_offset, at_eof)."""
+def read_chunk(path, off, final=False):
+    """Read whole lines from off, at most MAX_BYTES. Returns (bytes, new_offset, at_eof).
+
+    The partial last line of a live file waits for the next run; a rotated file
+    (final=True) will never be completed, so its tail is taken as it is.
+    """
     with path.open("rb") as f:
         size = os.fstat(f.fileno()).st_size
         f.seek(off)
         data = f.read(MAX_BYTES)
-    if not data.endswith(b"\n"):
+    # A rotated file (final=True) gets no more writes: take its unterminated tail.
+    if not data.endswith(b"\n") and not (final and off + len(data) >= size):
         nl = data.rfind(b"\n")
         if nl >= 0:
             data = data[:nl + 1]          # leave the partial line for the next run
@@ -100,7 +105,7 @@ def read_new(state):
         except OSError:
             ost = None
         if ost is not None and ost.st_ino == ino and off < ost.st_size:
-            old_text, new_off, done = read_chunk(old, off)
+            old_text, new_off, done = read_chunk(old, off, final=True)
             if not done:                  # more of the old file remains: stay on it
                 state["offset"] = new_off
                 return old_text.decode("utf-8", "replace")
@@ -128,8 +133,10 @@ def main():
     state = load_json(STATE, {})
     first_run = not state  # the backlog's own restart/login lines are old news
     cfg = load_json(KNOWN, {})
-    slim_ip = cfg.get("slim_ip")
-    known = {d["mac"].lower() for d in cfg.get("devices", []) if isinstance(d, dict) and d.get("mac")}
+    cfg = cfg if isinstance(cfg, dict) else {}
+    slim_ip = cfg.get("slim_ip") if isinstance(cfg.get("slim_ip"), str) else None
+    devices = cfg.get("devices") if isinstance(cfg.get("devices"), list) else []
+    known = {d["mac"].lower() for d in devices if isinstance(d, dict) and isinstance(d.get("mac"), str)}
     seen = state.get("seen_unknown", [])
     seen_set = set(seen)
     text = read_new(state)
@@ -144,7 +151,7 @@ def main():
                 new_devices[mac] = hhmm(line)
         if FAILED_RE.search(line):
             failed.append(line)
-        elif OK_LOGIN_RE.search(line):
+        elif OK_LOGIN_RE.search(line) and slim_ip:
             ips = IP_RE.findall(line)
             if not ips or any(ip != slim_ip for ip in ips):
                 logins.append(line)
@@ -154,6 +161,12 @@ def main():
     if first_run:
         failed, logins, restarts = [], [], []
     msg = []
+    # Without Slim's address every routine collector login would look foreign, so
+    # login alerts pause; say so once rather than alerting every minute.
+    if slim_ip is None and not state.get("warned_no_slim_ip"):
+        msg.append("⚠️ known-devices.json has no valid slim_ip, so ASUS login alerts are off "
+                   "(failed logins, new devices and restarts are still reported).")
+    state["warned_no_slim_ip"] = slim_ip is None
     if new_devices:
         msg.append("📡 New device on the ASUS Wi-Fi")
         for mac, t in list(new_devices.items())[:10]:

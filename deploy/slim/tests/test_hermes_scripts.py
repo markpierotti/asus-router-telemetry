@@ -136,6 +136,32 @@ class LogWatchTests(unittest.TestCase):
         self.append(f'hostapd: eth6: STA {KNOWN_MAC} IEEE 802.11: associated')
         self.assertIn(KNOWN_MAC, self.run_once())
 
+    def test_unterminated_tail_of_a_rotated_file_does_not_stall(self):
+        self.run_once()
+        with self.log.open('a') as f:
+            f.write(line("dropbear[2]: Bad password attempt for 'admin' from 192.0.2.99:6000"))
+            f.write("2026-10-18T14:00:01+10:00 dropbear[3]: partial line with no newline")
+        os.rename(self.log, self.log.with_name('asus.log.1'))
+        self.log.write_text(line('kernel: klogd started: BusyBox'))
+        out = self.run_once()
+        self.assertIn('failed login', out)
+        self.assertIn('ASUS restarted', out)  # moved on to the new file in the same run
+
+    def test_malformed_known_devices_values_do_not_crash(self):
+        for cfg in ({'devices': None}, [], 123, {'devices': [{'mac': 123}, None, 'x']}):
+            with self.subTest(cfg=cfg):
+                lw.KNOWN.write_text(json.dumps(cfg))
+                self.append(f'hostapd: eth6: STA {NEW_MAC} IEEE 802.11: associated')
+                self.run_once()
+
+    def test_missing_slim_ip_pauses_login_alerts_with_one_notice(self):
+        lw.KNOWN.write_text(json.dumps({'devices': []}))
+        self.run_once()
+        self.append("dropbear[1]: Pubkey auth succeeded for 'admin' with key from 192.0.2.10:2")
+        self.assertEqual(self.run_once(), '')  # notice already given on the first run
+        self.append("dropbear[1]: Pubkey auth succeeded for 'admin' with key from 192.0.2.10:2")
+        self.assertEqual(self.run_once(), '')
+
 
 class GrafanaAlertTests(unittest.TestCase):
     def setUp(self):
@@ -184,6 +210,20 @@ class GrafanaAlertTests(unittest.TestCase):
         self.assertEqual(out['count'], 2)
         self.assertIn('Gateway unreachable', out['alerts_text'])
         self.assertIn('Internet down', out['alerts_text'])
+
+    def test_correlation_skips_resolved_alerts_and_keeps_instances_apart(self):
+        self.send('firing', name='Gateway unreachable', fp='g')
+        self.send('resolved', name='Gateway unreachable', fp='g')
+        self.send('firing', name='Monitoring target down', fp='t1')
+        out = json.loads(self.send('firing', name='Monitoring target down', fp='t2'))
+        self.assertNotIn('Gateway unreachable', out['alerts_text'])
+        self.assertEqual(out['count'], 2)  # both target-down instances
+
+    def test_naive_timestamps_in_state_do_not_crash(self):
+        ga.SEEN.write_text(json.dumps({'abc|2026-10-18T14:00:00Z': '2026-10-18T14:00:00'}))
+        ga.LOG.write_text(json.dumps({'ts': '2026-10-18T14:00:00', 'status': 'firing', 'alertname': 'old'}) + '\n')
+        out = json.loads(self.send('firing'))
+        self.assertNotIn('old', out['alerts_text'])
 
     def test_malformed_payloads_are_ignored(self):
         for bad in ([], None, {'alerts': None}, {'alerts': [None, {'labels': None, 'annotations': None}]}):

@@ -31,12 +31,13 @@ LOGIN_RE = re.compile(r"(?i)(?:password|pubkey) auth succeeded|login success|log
 IP_RE = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b")
 
 
-def read_chunk(path, off):
+def read_chunk(path, off, final=False):
     with path.open("rb") as f:
         size = os.fstat(f.fileno()).st_size
         f.seek(off)
         data = f.read(MAX_BYTES)
-    if not data.endswith(b"\n"):
+    # A rotated file (final=True) gets no more writes: take its unterminated tail.
+    if not data.endswith(b"\n") and not (final and off + len(data) >= size):
         nl = data.rfind(b"\n")
         if nl >= 0:
             data = data[:nl + 1]
@@ -60,7 +61,7 @@ def read_new(state):
         except OSError:
             ost = None
         if ost is not None and ost.st_ino == ino and off < ost.st_size:
-            old_text, new_off, done = read_chunk(old, off)
+            old_text, new_off, done = read_chunk(old, off, final=True)
             if not done:
                 state["offset"] = new_off
                 return old_text.decode("utf-8", "replace")
@@ -92,10 +93,13 @@ def main():
             if any(ip != SLIM_IP for ip in IP_RE.findall(line)) or not IP_RE.search(line):
                 counts["login_other"] += 1
 
+    last = state.get("last_line", 0)
     try:
-        last = LOG.stat().st_mtime
+        st = LOG.stat()
+        if st.st_size > 0:          # an empty or freshly rotated file proves nothing
+            last = st.st_mtime
     except OSError:
-        last = state.get("last_line", 0)
+        pass
     state["last_line"] = last
 
     help_text = {

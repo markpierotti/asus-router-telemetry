@@ -1,8 +1,9 @@
 # Slim Telegram alerts and external heartbeat — 2026-10-18
 
 This milestone adds direct Grafana Telegram delivery and an external Healthchecks
-heartbeat. It leaves the live collector at 1.6.0 with its interim restart policy.
-The repository's 1.6.2 collector/unit deployment remains separate.
+heartbeat. At the time it left the live collector at 1.6.0 with its interim restart
+policy; 1.6.2 and its unit were deployed later the same day
+([record](slim-collector-162-20261018.md)).
 
 ## Configuration
 

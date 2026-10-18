@@ -121,9 +121,10 @@ def main():
     print("\n[DNS clients in 24h]")
     try:
         cfg = json.loads((NET / "known-devices.json").read_text())
-        known = {d["ip"]: d["name"] for d in cfg.get("devices", []) if isinstance(d, dict) and d.get("ip")}
-        SETTINGS["slim_ip"] = cfg.get("slim_ip")
-    except (OSError, ValueError, AttributeError) as e:
+        devices = cfg.get("devices") if isinstance(cfg.get("devices"), list) else []
+        known = {str(d["ip"]): str(d.get("name", "?")) for d in devices if isinstance(d, dict) and d.get("ip")}
+        SETTINGS["slim_ip"] = cfg.get("slim_ip") if isinstance(cfg.get("slim_ip"), str) else None
+    except (OSError, ValueError, TypeError, AttributeError, KeyError) as e:
         known = {}
         print(f"- (known-devices.json unreadable: {type(e).__name__}; every client shows UNKNOWN)")
     for r in sorted(q('pihole_client_queries_24h'), key=lambda r: -float(r["value"][1])):

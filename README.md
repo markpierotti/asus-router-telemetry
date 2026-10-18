@@ -145,15 +145,18 @@ Collector **1.6.0** adds explicit key authentication. The accompanying Slim exam
 runs it under systemd, with external exporters and Grafana alert evaluation.
 At the 17 October live check, the collector was still producing samples about four
 hours after startup. This is an observation, not a controlled endurance trial.
-This branch contains undeployed **1.6.2**, including the storage correction and
-a distinct loop hard-stop exit code. Deploy its matching service unit together
-with the collector; see the [review dispositions](docs/slim-review-triage-20261017.md).
+Collector **1.6.2**, with the storage correction and a distinct loop hard-stop exit
+code, was deployed on Slim with its matching service unit on 18 October 2026; see
+the [deployment record](docs/slim-collector-162-20261018.md) and the
+[review dispositions](docs/slim-review-triage-20261017.md).
 The earlier v0.1.0 release and its v1.5.5 bench acceptance remain unchanged.
 
-Controlled reboot/power-loss recovery, a backup restore rehearsal, external alert
-delivery, USB NAS performance and whole-network visibility remain unvalidated.
-ASUS AP mode is in use; segmentation, Suricata and Project Limbo remain planned.
-There is no automatic remediation or deployed SOC claim.
+Telegram alert delivery (firing and resolved) and the external heartbeat were
+tested live on 18 October 2026. Controlled reboot/power-loss recovery, a backup
+restore rehearsal, a real internet or model-provider outage, USB NAS performance and
+whole-network visibility remain unvalidated. ASUS AP mode is in use; segmentation,
+Suricata and Project Limbo remain planned. The Hermes operator is read-only: there
+is no automatic remediation or SOC claim.
 
 Credentials, actual host keys, private configuration, raw history, vendor firmware
 and extracted proprietary binaries are excluded. Local agent worktrees are ignored.

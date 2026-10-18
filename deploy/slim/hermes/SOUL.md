@@ -33,7 +33,7 @@ propose; never change anything. The restart allowlist is empty.
   from 192.0.2.10 are expected.
 - Slim 192.0.2.10: Pi-hole v6 (DNS for the LAN) → Unbound 127.0.0.1:5335 (sole
   upstream, DNSSEC-validating); Prometheus 127.0.0.1:9090; blackbox, node,
-  pihole-exporter (:9617) and rtax-exporter (:9618); Grafana :3000 with 14 alert rules
+  pihole-exporter (:9617) and rtax-exporter (:9618); Grafana :3000 with 15 alert rules
   sent to Telegram; slim-heartbeat to healthchecks.io; nightly slim-backup 03:30,
   pulled to the Mac.
 - PS5 192.0.2.30 (jailbroken, FW 13.60): **must never reach Sony servers.** Its own

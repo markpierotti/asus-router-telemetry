@@ -60,6 +60,21 @@ class AsusSyslogMetricsTests(unittest.TestCase):
         self.assertEqual(second['asus_syslog_restart_total'], 2)
         self.assertGreater(second['asus_syslog_last_line_timestamp_seconds'], 0)
 
+    def test_empty_file_does_not_reset_last_line_time(self):
+        self.log.write_text('')
+        self.assertEqual(self.metrics()['asus_syslog_last_line_timestamp_seconds'], 0)
+
+    def test_unterminated_rotated_tail_is_counted_and_does_not_stall(self):
+        self.write('hostapd: eth6: STA 02:00:5e:00:00:40 IEEE 802.11: associated')
+        self.metrics()
+        with self.log.open('a') as f:
+            f.write("2026-10-18T14:00:00+10:00 dropbear[1]: Bad password attempt for 'admin' from 192.0.2.99:1")
+        os.rename(self.log, self.log.with_name('asus.log.1'))
+        self.write('kernel: klogd started: BusyBox')
+        out = self.metrics()
+        self.assertEqual(out['asus_syslog_auth_failure_total'], 1)
+        self.assertEqual(out['asus_syslog_restart_total'], 1)
+
     def test_missing_log_still_writes_metrics(self):
         out = self.metrics()
         self.assertEqual(out['asus_syslog_lines_total'], 0)

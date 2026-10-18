@@ -35,10 +35,12 @@ def atomic_write(path, text):
 
 
 def parse_ts(s):
+    """An offset-aware datetime, or None (naive values cannot be compared with now)."""
     try:
-        return datetime.fromisoformat(s)
+        dt = datetime.fromisoformat(s)
     except (TypeError, ValueError):
         return None
+    return dt if dt.tzinfo is not None else None
 
 
 def append_bounded(records, now):
@@ -51,7 +53,8 @@ def append_bounded(records, now):
         keep = []
         for l in lines:
             try:
-                if parse_ts(json.loads(l)["ts"]) >= cutoff:
+                t = parse_ts(json.loads(l)["ts"])
+                if t is not None and t >= cutoff:
                     keep.append(l)
             except (ValueError, KeyError, TypeError):
                 continue
@@ -85,6 +88,7 @@ def main():
             labels = a.get("labels") if isinstance(a.get("labels"), dict) else {}
             ann = a.get("annotations") if isinstance(a.get("annotations"), dict) else {}
             rec = {"ts": now.isoformat(timespec="seconds"), "status": a.get("status"),
+                   "fingerprint": str(a.get("fingerprint") or "")[:64],
                    "alertname": labels.get("alertname"), "severity": labels.get("severity"),
                    "startsAt": a.get("startsAt"), "summary": str(ann.get("summary") or "")[:300],
                    "value": str(a.get("valueString") or "")[:300]}
@@ -106,18 +110,25 @@ def main():
 
     if not wake:
         return
-    # Everything that fired recently, so a coalesced run sees the whole incident.
-    recent, names = [], set()
+    # Everything still firing that fired recently, so a coalesced run sees the whole
+    # incident. Newest first: a later "resolved" record hides that alert's older
+    # "firing" ones; instances of one rule stay separate (keyed by fingerprint).
+    recent, done = [], set()
     for l in reversed(lines):
         try:
             r = json.loads(l)
         except ValueError:
             continue
+        if not isinstance(r, dict):
+            continue
         t = parse_ts(r.get("ts"))
         if t is None or now - t > CORRELATE_WINDOW:
             break
-        if r.get("status") == "firing" and r.get("alertname") not in names:
-            names.add(r.get("alertname"))
+        key = r.get("fingerprint") or f"{r.get('alertname')}|{r.get('startsAt')}"
+        if key in done:
+            continue
+        done.add(key)
+        if r.get("status") == "firing":
             recent.append(r)
     recent.reverse()
     text = "\n".join(f"- {r['alertname']} (severity {r['severity']}), firing since {r['startsAt']}\n"
