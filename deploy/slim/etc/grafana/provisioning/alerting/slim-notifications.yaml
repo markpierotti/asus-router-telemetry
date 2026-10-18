@@ -16,6 +16,19 @@
             "parse_mode": "None",
             "disable_web_page_preview": true
           }
+        },
+        {
+          "uid": "slim-hermes",
+          "type": "webhook",
+          "disableResolveMessage": false,
+          "settings": {
+            "url": "http://127.0.0.1:8644/webhooks/grafana",
+            "httpMethod": "POST",
+            "hmacConfig": {
+              "secret": "$SLIM_HERMES_WEBHOOK_SECRET",
+              "header": "X-Webhook-Signature"
+            }
+          }
         }
       ]
     }
