@@ -109,12 +109,71 @@ coalesced into one investigation.
 
 Not exercised: a real gateway/internet outage and a live model-provider outage.
 
+## Codex re-review fixes (commit `1d2eb7f`, deployed 2026-10-18 20:49 AEST)
+
+Codex re-reviewed `844c7be..ab451e1` and raised three issues, all addressed by
+`1d2eb7f`:
+
+1. **Rotated-tail record merge (fixed).** An unterminated last line of the rotated
+   file was joined to the first line of the new file, so a failed-login tail hid a
+   following foreign login and the exporter counted one line too few. Both readers
+   now end that tail with a newline before appending the new file's lines.
+2. **Empty `slim_ip` silently disabled login alerts (fixed).** Empty,
+   whitespace-only and non-IP values are now treated as missing: login alerts pause
+   with the one-time notice.
+3. **Documentation (corrected).** `SECURITY.md` heartbeat wording, the follow-up
+   trigger in the jobs table, the 1 MB trim threshold, oversized single lines and
+   the stated fixture coverage.
+
+Tests at `1d2eb7f`:
+
+- Deployment suite, run locally before commit: 37 tests, OK. The new rotated-tail
+  and `slim_ip` fixtures were also run against the `ab451e1` scripts and failed
+  there, as expected.
+- Full `make test`, run locally: exited 0 with `OK`. The saved output kept only its
+  last lines, so local per-suite counts were not recorded.
+- CI [run 39120348870](https://github.com/markpierotti/asus-router-telemetry/actions/runs/39120348870)
+  (`make test`): all four jobs passed (macOS 15 and Ubuntu 24.04, Python 3.11 and
+  3.13). Each job ran 393 collector tests, OK (1 skipped), and 37 deployment tests,
+  OK.
+
+Deployment (only these two files changed; no service restarted, no other
+configuration touched). Backup:
+`/var/backups/slim-manual/20261018-204915-codex-rereview/` (root:root 755).
+
+| File | Owner, mode | Backed-up SHA-256 (`ab451e1`) | Installed SHA-256 (`1d2eb7f`) |
+| --- | --- | --- | --- |
+| `/home/hermes/.hermes/scripts/asus-logwatch.py` | hermes:hermes 0700 | `c1092d8bd4eae5cbc261cd977dcd24adb534f9dd778a37ac46bbb9921de27f65` | `3c0e7163d56137794dda08301321bac1ee2dd1ed01555f0949f2b8c30c67b46a` |
+| `/usr/local/bin/asus-syslog-metrics` | root:root 0755 | `0fcbc52dc2a77fa60707e9452c598e6625d52bc3e5e6b9c7dd52ef0113119222` | `5630347df6920459cd28ef9ae2c5cb39778b91846b61ce05f2a02074ea886674` |
+
+Ownership and modes are unchanged from the backed-up copies, and the installed
+hashes match the repository at `1d2eb7f`. Files installed 20:49:15 AEST.
+
+Live observations, each script running under its normal identity:
+
+- `asus-syslog-metrics.service` (started once by hand, then the timer): finished
+  successfully at 20:49:21, 20:50:28, 20:51:28 and 20:52:28. The textfile was
+  rewritten (root:root 0644), and Prometheus (job `node`, instance `slim`) returned
+  `asus_syslog_metrics_run_timestamp_seconds` from the 20:50:28 run.
+- `asus-log-watch` (Hermes scheduler inside the sandboxed gateway): runs at 20:50:41
+  and 20:52:41 completed. Its state file was updated at 20:50:44 and follows the
+  current log inode. No new events were derived, the no-`slim_ip` notice is not set,
+  and the gateway journal showed no errors after the install.
+- Observed cadence: although the job is configured `every 1m`, its recorded runs
+  (20:38:41 to 20:52:41) are 2 minutes apart. This was not investigated or changed.
+
+These observations cover one short window. They are not outage, endurance or
+reboot acceptance and establish no general reliability claim; the limits under
+"Not exercised" above still apply.
+
 ## Rollback
 
 Root-only manual backup directories on Slim (`*-hermes`, `*-grafana-hermes`) hold
 the previous Grafana notification file, the wrapper, `slim-backup` and the Hermes
 config, and `*-hermes-harden` holds the former user unit. To drop only the sandbox,
 remove the drop-in and `systemctl daemon-reload && systemctl restart hermes-gateway`.
+To undo `1d2eb7f` on Slim, copy the two files back from
+`*-codex-rereview` with `cp -a`, which keeps their ownership and modes.
 To remove Hermes: restore the two Grafana files and restart Grafana, then
 `sudo hermes gateway uninstall --system`, `loginctl disable-linger hermes`, and
 delete the account.
