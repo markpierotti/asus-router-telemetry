@@ -12,7 +12,7 @@
           "settings": {
             "bottoken": "$SLIM_TELEGRAM_BOT_TOKEN",
             "chatid": "$SLIM_TELEGRAM_CHAT_ID",
-            "message": "{{ template \"default.message\" . }}",
+            "message": "{{ template \"slim.telegram\" . }}",
             "parse_mode": "None",
             "disable_web_page_preview": true
           }
@@ -31,6 +31,13 @@
       "group_wait": "30s",
       "group_interval": "5m",
       "repeat_interval": "4h"
+    }
+  ],
+  "templates": [
+    {
+      "orgId": 1,
+      "name": "slim-telegram",
+      "template": "{{ define \"slim.telegram\" -}}\n{{ range .Alerts.Firing -}}\n{{ if eq .Labels.severity \"critical\" }}🔴{{ else }}🟠{{ end }} FIRING: {{ .Labels.alertname }}\n{{ with .Annotations.summary }}{{ . }}\n{{ end }}Since {{ .StartsAt.Local.Format \"3:04pm Mon 2 Jan\" }}\n\n{{ end -}}\n{{ range .Alerts.Resolved -}}\n✅ RESOLVED: {{ .Labels.alertname }}\n{{ .EndsAt.Local.Format \"3:04pm Mon 2 Jan\" }} (started {{ .StartsAt.Local.Format \"3:04pm\" }})\n\n{{ end -}}\n{{ .ExternalURL }}alerting/list\n{{- end }}"
     }
   ]
 }

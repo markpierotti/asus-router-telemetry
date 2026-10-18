@@ -39,7 +39,7 @@
     "etc/default/prometheus-blackbox-exporter": "361acfd80f0db9e302edd1d0ec6d01cbd7d4d712772b77333e8eb19329d6ba5a",
     "etc/default/prometheus-node-exporter": "4afa09e75e2b554c9ff3547f263cefcd4af765cde02d85add6d8882509d6f803",
     "etc/grafana/grafana.ini.example": "1ab6afdb2edd272f2021cc51bf03b3c8f0f501c72779661e3ece7a6794510657",
-    "etc/grafana/provisioning/alerting/slim-notifications.yaml": "471f587d0586cdf16696c5edaaab9d0548bb3bfa47cd1afaa6d5a7e1c669a25b",
+    "etc/grafana/provisioning/alerting/slim-notifications.yaml": "796e30c4f1b8754e342f745f2da3506ca0e75aeae795a00b7a212a592ae256bf",
     "etc/grafana/provisioning/alerting/slim-rules.yaml": "7bd0bf465af39579e0a3240f6290b7dbdb921efb470f0007343563405097b846",
     "etc/grafana/provisioning/dashboards/slim.yaml": "c630db4eb2392163fe77b78980b486566564711cee8cf724981f9f2cd8168046",
     "etc/grafana/provisioning/datasources/prometheus.yaml": "d1e7c59ffa370e616c798288bc8373a0129aa947120517853181dd94acfb5e41",
