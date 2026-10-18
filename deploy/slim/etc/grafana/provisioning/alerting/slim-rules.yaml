@@ -59,6 +59,57 @@
      "isPaused": false
     },
     {
+     "uid": "unbound-down",
+     "title": "Unbound resolver not answering",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "probe_success{job=\"dns_unbound\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "2m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "Unbound, Pi-hole's only upstream, isn't answering on slim: new lookups will fail. Quick fix: sudo pihole-FTL --config dns.upstreams '[\"1.1.1.1\",\"9.9.9.9\"]'"
+     },
+     "labels": {
+      "severity": "critical"
+     },
+     "isPaused": false
+    },
+    {
      "uid": "gateway-down",
      "title": "Main gateway unreachable",
      "condition": "B",
