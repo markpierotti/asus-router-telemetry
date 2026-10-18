@@ -28,7 +28,9 @@ dpkg --get-selections > "$work/dpkg-selections.txt"
   grafana-server -v 2>/dev/null || true; prometheus --version 2>&1 | head -1; } > "$work/versions.txt"
 
 tar -C / --ignore-failed-read -czf "$work/files.tar.gz" \
-  etc/grafana var/lib/grafana/dashboards \
+  etc/grafana var/lib/grafana/dashboards etc/slim-secrets \
+  etc/systemd/system/grafana-server.service.d \
+  etc/systemd/system/slim-heartbeat.service etc/systemd/system/slim-heartbeat.timer \
   etc/prometheus etc/default/prometheus etc/default/prometheus-node-exporter \
   etc/default/prometheus-blackbox-exporter \
   etc/systemd/system/pihole-exporter.service \

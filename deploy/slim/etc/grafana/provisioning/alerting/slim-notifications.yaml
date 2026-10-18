@@ -1,0 +1,36 @@
+{
+  "apiVersion": 1,
+  "contactPoints": [
+    {
+      "orgId": 1,
+      "name": "Telegram",
+      "receivers": [
+        {
+          "uid": "slim-telegram",
+          "type": "telegram",
+          "disableResolveMessage": false,
+          "settings": {
+            "bottoken": "$SLIM_TELEGRAM_BOT_TOKEN",
+            "chatid": "$SLIM_TELEGRAM_CHAT_ID",
+            "message": "{{ template \"default.message\" . }}",
+            "parse_mode": "None",
+            "disable_web_page_preview": true
+          }
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "orgId": 1,
+      "receiver": "Telegram",
+      "group_by": [
+        "grafana_folder",
+        "alertname"
+      ],
+      "group_wait": "30s",
+      "group_interval": "5m",
+      "repeat_interval": "4h"
+    }
+  ]
+}

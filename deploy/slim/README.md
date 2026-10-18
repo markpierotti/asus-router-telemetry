@@ -137,4 +137,6 @@ pinned directories; moving it into either would include it in backups. See [oper
 
 The screen-rotation helper is optional and specific to an inverted local monitor.
 It skips headless and xrdp sessions. This tree does not configure network renderers,
-household DNS cutover, BIOS recovery, remote desktop or Telegram credentials.
+household DNS cutover, BIOS recovery or remote desktop. Telegram provisioning
+uses secret-file values supplied by the operator; no credentials are published.
+See [the Telegram and heartbeat milestone](../../docs/slim-alerts-20261018.md).
