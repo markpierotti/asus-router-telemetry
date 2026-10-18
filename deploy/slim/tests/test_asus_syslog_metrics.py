@@ -75,6 +75,18 @@ class AsusSyslogMetricsTests(unittest.TestCase):
         self.assertEqual(out['asus_syslog_auth_failure_total'], 1)
         self.assertEqual(out['asus_syslog_restart_total'], 1)
 
+    def test_unterminated_rotated_tail_stays_a_separate_record(self):
+        self.write('hostapd: eth6: STA 02:00:5e:00:00:40 IEEE 802.11: associated')
+        self.metrics()
+        with self.log.open('a') as f:
+            f.write("2026-10-18T14:00:00+10:00 dropbear[1]: Bad password attempt for 'admin' from 192.0.2.99:1")
+        os.rename(self.log, self.log.with_name('asus.log.1'))
+        self.write("dropbear[2]: Password auth succeeded for 'admin' from 192.0.2.99:2")
+        out = self.metrics()
+        self.assertEqual(out['asus_syslog_lines_total'], 3)
+        self.assertEqual(out['asus_syslog_auth_failure_total'], 1)
+        self.assertEqual(out['asus_syslog_login_other_total'], 1)
+
     def test_missing_log_still_writes_metrics(self):
         out = self.metrics()
         self.assertEqual(out['asus_syslog_lines_total'], 0)

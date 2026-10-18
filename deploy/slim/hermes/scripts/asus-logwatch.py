@@ -7,6 +7,7 @@ time it is seen), failed logins, logins from anywhere but Slim, and the AP
 restarting. Prints nothing when there is nothing to report (silent tick).
 No model calls. Log text is treated as data only.
 """
+import ipaddress
 import json
 import os
 import re
@@ -109,12 +110,24 @@ def read_new(state):
             if not done:                  # more of the old file remains: stay on it
                 state["offset"] = new_off
                 return old_text.decode("utf-8", "replace")
+            if old_text and not old_text.endswith(b"\n"):
+                old_text += b"\n"    # its unterminated last record ends here
         off = 0
     elif st.st_size < off:                # truncated in place
         off = 0
     data, new_off, _ = read_chunk(LOG, off)
     state["inode"], state["offset"] = st.st_ino, new_off
     return (old_text + data).decode("utf-8", "replace")
+
+
+def valid_ip(value):
+    """The address as a string, or None when missing, empty or not an IP address."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
 
 
 def is_random(mac):
@@ -134,7 +147,7 @@ def main():
     first_run = not state  # the backlog's own restart/login lines are old news
     cfg = load_json(KNOWN, {})
     cfg = cfg if isinstance(cfg, dict) else {}
-    slim_ip = cfg.get("slim_ip") if isinstance(cfg.get("slim_ip"), str) else None
+    slim_ip = valid_ip(cfg.get("slim_ip"))
     devices = cfg.get("devices") if isinstance(cfg.get("devices"), list) else []
     known = {d["mac"].lower() for d in devices if isinstance(d, dict) and isinstance(d.get("mac"), str)}
     seen = state.get("seen_unknown", [])

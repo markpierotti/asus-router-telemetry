@@ -147,6 +147,16 @@ class LogWatchTests(unittest.TestCase):
         self.assertIn('failed login', out)
         self.assertIn('ASUS restarted', out)  # moved on to the new file in the same run
 
+    def test_unterminated_rotated_tail_stays_a_separate_record(self):
+        self.run_once()
+        with self.log.open('a') as f:
+            f.write("2026-10-18T14:00:01+10:00 dropbear[3]: Bad password attempt for 'admin' from 192.0.2.99:1")
+        os.rename(self.log, self.log.with_name('asus.log.1'))
+        self.log.write_text(line("dropbear[4]: Password auth succeeded for 'admin' from 192.0.2.99:2"))
+        out = self.run_once()
+        self.assertIn('1 failed login', out)
+        self.assertIn('Login to the ASUS from somewhere other than Slim', out)
+
     def test_malformed_known_devices_values_do_not_crash(self):
         for cfg in ({'devices': None}, [], 123, {'devices': [{'mac': 123}, None, 'x']}):
             with self.subTest(cfg=cfg):
@@ -162,6 +172,13 @@ class LogWatchTests(unittest.TestCase):
         self.append("dropbear[1]: Pubkey auth succeeded for 'admin' with key from 192.0.2.10:2")
         self.assertEqual(self.run_once(), '')
 
+
+    def test_empty_or_invalid_slim_ip_is_reported_like_a_missing_one(self):
+        for bad in ('', '   ', 'slim', '192.0.2'):
+            with self.subTest(slim_ip=bad):
+                lw.STATE.unlink(missing_ok=True)
+                lw.KNOWN.write_text(json.dumps({'slim_ip': bad, 'devices': []}))
+                self.assertIn('no valid slim_ip', self.run_once())
 
 class GrafanaAlertTests(unittest.TestCase):
     def setUp(self):

@@ -65,6 +65,8 @@ def read_new(state):
             if not done:
                 state["offset"] = new_off
                 return old_text.decode("utf-8", "replace")
+            if old_text and not old_text.endswith(b"\n"):
+                old_text += b"\n"    # its unterminated last record ends here
         off = 0
     elif st.st_size < off:
         off = 0

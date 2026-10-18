@@ -37,7 +37,7 @@ the model is called only for chat, alert follow-ups and one morning digest.
 | --- | --- | --- |
 | `asus-log-watch` (`scripts/asus-logwatch.py`) | Hermes cron, every minute, `--no-agent` | none |
 | `morning-digest` (`scripts/slim-snapshot.py` as context) | Hermes cron, 08:00 | one call |
-| Alert follow-up (`scripts/grafana-alert.py` transform) | Grafana webhook | only for newly firing alerts |
+| Alert follow-up (`scripts/grafana-alert.py` transform) | Grafana webhook | newly firing alerts, and alerts still firing at Grafana's 4-hour repeat |
 
 - The log watcher follows `asus.log` by inode and offset (including the tail of the
   rotated file) and reports unknown Wi-Fi MACs once each, failed logins, logins from
@@ -62,10 +62,16 @@ the model is called only for chat, alert follow-ups and one morning digest.
   window, 180 s cap). Gateway, AP and internet alerts arriving together become one
   investigation that looks for a shared cause; the Telegram alerts themselves are
   still grouped per alert name.
-- Derived histories (`grafana-alerts.jsonl`, `asus-events.jsonl`) are trimmed to 30
-  days once they pass 1 MB; the snapshot reads only their last 1 MB and the last 4 MB
-  of the ASUS log. The watcher reads whole lines only and finishes a rotated file
-  before moving to the new one.
+- Derived histories (`grafana-alerts.jsonl`, `asus-events.jsonl`) are trimmed to the
+  last 30 days and at most 5,000 records once they pass 1 MB. 1 MB is the trigger,
+  not a ceiling: 5,000 records can be several MB. The snapshot reads only their last
+  1 MB and the last 4 MB of the ASUS log.
+- The watcher and the metrics exporter read whole lines and finish a rotated file
+  before moving to the new one. The rotated file's last line is taken even without a
+  newline and kept as its own record. A single line longer than the read limit (2 MB
+  watcher, 4 MB exporter) is read in pieces; rsyslog does not produce such lines here.
+- A `slim_ip` that is missing, empty or not an IP address pauses login alerts with a
+  one-time notice.
 
 Provisioning gotcha: rewrite `slim-notifications.yaml` with
 `json.dump(..., ensure_ascii=False)`. ASCII-escaped emoji (`\ud83d…`) in the message
@@ -86,8 +92,11 @@ template make Grafana's YAML parser fail and alert provisioning stop.
 Codex and Gemini Argon reviews found unbounded derived histories, split lines at the
 read limit, abandoned rotated tails, dedupe committed before triage, unlocked state
 writes, an unguarded known-devices read, missing correlation, no service sandbox and
-stale documentation. All are fixed above and covered by fixtures
-(`tests/test_hermes_scripts.py`, `tests/test_asus_syslog_metrics.py`). Owner decisions:
+stale documentation. The fixes are described above. Fixtures in
+`tests/test_hermes_scripts.py` and `tests/test_asus_syslog_metrics.py` cover the
+log readers, payload handling, gating and correlation. Concurrent webhook deliveries
+(the file lock) and the live systemd sandbox are not exercised by fixtures; the
+sandbox was checked by hand on Slim. Owner decisions:
 daily syslog rotation with 30 kept; digest at 08:00; deterministic ASUS syslog
 metrics plus a silence alert (see the syslog note); the hardened system service. The
 empty restart allowlist is enforced by Hermes' manual approvals and the account
