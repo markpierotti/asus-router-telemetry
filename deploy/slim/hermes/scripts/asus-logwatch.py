@@ -11,7 +11,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 LOG = Path(os.environ.get("ASUS_LOG", "/var/log/asus/asus.log"))
@@ -19,8 +19,10 @@ NET = Path.home() / "network"
 STATE = NET / "state" / "asus-logwatch.json"
 EVENTS = NET / "state" / "asus-events.jsonl"
 KNOWN = NET / "known-devices.json"
-SLIM_IP = "192.0.2.10"
-MAX_BYTES = 2_000_000  # never read more than this per run
+MAX_BYTES = 2_000_000          # read at most this much per file per run
+EVENTS_MAX_BYTES = 1_000_000   # derived history is trimmed past this size...
+EVENTS_KEEP_DAYS = 30          # ...to this many days
+SEEN_MAX = 2000                # remembered unknown MACs (private addresses rotate)
 
 MAC_RE = re.compile(r"\b(?:STA|Assoc|ReAssoc|Auth|Deauth|Disassoc)\b[^0-9a-fA-F]{0,12}"
                     r"((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})")
@@ -44,32 +46,70 @@ def save_json(path, data):
     os.replace(tmp, path)
 
 
+def append_bounded(path, records):
+    """Append JSONL records; once the file passes EVENTS_MAX_BYTES keep only recent ones."""
+    if not records:
+        return
+    with path.open("a") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+    if path.stat().st_size <= EVENTS_MAX_BYTES:
+        return
+    cutoff = datetime.now().astimezone() - timedelta(days=EVENTS_KEEP_DAYS)
+    keep = []
+    for l in path.read_text().splitlines():
+        try:
+            if datetime.fromisoformat(json.loads(l)["ts"]) >= cutoff:
+                keep.append(l)
+        except (ValueError, KeyError, TypeError):
+            continue
+    keep = keep[-5000:]
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("".join(l + "\n" for l in keep))
+    os.replace(tmp, path)
+
+
+def read_chunk(path, off):
+    """Read whole lines from off, at most MAX_BYTES. Returns (bytes, new_offset, at_eof)."""
+    with path.open("rb") as f:
+        size = os.fstat(f.fileno()).st_size
+        f.seek(off)
+        data = f.read(MAX_BYTES)
+    if not data.endswith(b"\n"):
+        nl = data.rfind(b"\n")
+        if nl >= 0:
+            data = data[:nl + 1]          # leave the partial line for the next run
+        elif len(data) < MAX_BYTES:
+            data = b""                    # a single unfinished line: wait for it
+    new_off = off + len(data)
+    return data, new_off, new_off >= size
+
+
 def read_new(state):
-    """Return new text since the saved offset, following rotation to asus.log.1."""
+    """New text since the saved position. A rotated file is finished before moving on."""
     try:
         st = LOG.stat()
     except FileNotFoundError:
         return ""
-    chunks = []
     ino, off = state.get("inode"), state.get("offset", 0)
+    old_text = b""
     if ino is not None and ino != st.st_ino:
         old = LOG.with_name(LOG.name + ".1")
         try:
-            if old.stat().st_ino == ino:
-                with old.open("rb") as f:
-                    f.seek(off)
-                    chunks.append(f.read(MAX_BYTES))
+            ost = old.stat()
         except OSError:
-            pass
+            ost = None
+        if ost is not None and ost.st_ino == ino and off < ost.st_size:
+            old_text, new_off, done = read_chunk(old, off)
+            if not done:                  # more of the old file remains: stay on it
+                state["offset"] = new_off
+                return old_text.decode("utf-8", "replace")
         off = 0
-    elif st.st_size < off:
+    elif st.st_size < off:                # truncated in place
         off = 0
-    with LOG.open("rb") as f:
-        f.seek(off)
-        chunks.append(f.read(MAX_BYTES))
-        state["offset"] = f.tell()
-    state["inode"] = st.st_ino
-    return b"".join(chunks).decode("utf-8", "replace")
+    data, new_off, _ = read_chunk(LOG, off)
+    state["inode"], state["offset"] = st.st_ino, new_off
+    return (old_text + data).decode("utf-8", "replace")
 
 
 def is_random(mac):
@@ -87,8 +127,11 @@ def main():
     (NET / "state").mkdir(parents=True, exist_ok=True)
     state = load_json(STATE, {})
     first_run = not state  # the backlog's own restart/login lines are old news
-    known = {d["mac"].lower() for d in load_json(KNOWN, {}).get("devices", []) if d.get("mac")}
-    seen = set(state.get("seen_unknown", []))
+    cfg = load_json(KNOWN, {})
+    slim_ip = cfg.get("slim_ip")
+    known = {d["mac"].lower() for d in cfg.get("devices", []) if isinstance(d, dict) and d.get("mac")}
+    seen = state.get("seen_unknown", [])
+    seen_set = set(seen)
     text = read_new(state)
 
     new_devices, failed, logins, restarts = {}, [], [], []
@@ -97,13 +140,13 @@ def main():
             continue
         for mac in MAC_RE.findall(line):
             mac = mac.lower()
-            if mac not in known and mac not in seen and mac not in new_devices:
+            if mac not in known and mac not in seen_set and mac not in new_devices:
                 new_devices[mac] = hhmm(line)
         if FAILED_RE.search(line):
             failed.append(line)
         elif OK_LOGIN_RE.search(line):
             ips = IP_RE.findall(line)
-            if not ips or any(ip != SLIM_IP for ip in ips):
+            if not ips or any(ip != slim_ip for ip in ips):
                 logins.append(line)
         if RESTART_RE.search(line):
             restarts.append(hhmm(line))
@@ -112,10 +155,12 @@ def main():
         failed, logins, restarts = [], [], []
     msg = []
     if new_devices:
-        msg.append("📡 New device on the ASUS Wi-Fi" + ("s" if len(new_devices) > 1 else ""))
-        for mac, t in new_devices.items():
+        msg.append("📡 New device on the ASUS Wi-Fi")
+        for mac, t in list(new_devices.items())[:10]:
             kind = "private/random address" if is_random(mac) else "fixed address"
             msg.append(f"• {t}  {mac} ({kind})")
+        if len(new_devices) > 10:
+            msg.append(f"• …and {len(new_devices) - 10} more")
         msg.append("Not in your known-devices list. Tell me what it is and I'll note it.")
     if failed:
         msg.append(f"🔐 {len(failed)} failed login attempt(s) on the ASUS")
@@ -127,17 +172,13 @@ def main():
         msg.append(f"🔄 ASUS restarted (or restarted its logging) at {restarts[-1]}")
 
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    with EVENTS.open("a") as ev:
-        for mac in new_devices:
-            ev.write(json.dumps({"ts": now, "type": "new_device", "mac": mac}) + "\n")
-        for l in failed:
-            ev.write(json.dumps({"ts": now, "type": "failed_login", "line": l[:300]}) + "\n")
-        for l in logins:
-            ev.write(json.dumps({"ts": now, "type": "login", "line": l[:300]}) + "\n")
-        for t in restarts:
-            ev.write(json.dumps({"ts": now, "type": "restart", "at": t}) + "\n")
+    append_bounded(EVENTS,
+                   [{"ts": now, "type": "new_device", "mac": m} for m in new_devices]
+                   + [{"ts": now, "type": "failed_login", "line": l[:300]} for l in failed[-50:]]
+                   + [{"ts": now, "type": "login", "line": l[:300]} for l in logins[-50:]]
+                   + [{"ts": now, "type": "restart", "at": t} for t in restarts[-5:]])
 
-    state["seen_unknown"] = sorted(seen | set(new_devices))
+    state["seen_unknown"] = (seen + list(new_devices))[-SEEN_MAX:]
     save_json(STATE, state)
     if msg:
         print("\n".join(msg))

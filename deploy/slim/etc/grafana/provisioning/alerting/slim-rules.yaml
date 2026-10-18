@@ -620,6 +620,57 @@
      "isPaused": false
     },
     {
+     "uid": "asus-syslog-silent",
+     "title": "ASUS syslog silent",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "(time() - asus_syslog_last_line_timestamp_seconds) / 60",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            60
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "5m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "No syslog from the ASUS for over an hour. Slim's SSH probe normally makes it log every minute, so syslog delivery is broken (check the ASUS Remote Log Server setting and: sudo systemctl status rsyslog asus-syslog-metrics.timer)."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
      "uid": "router-memory-low",
      "title": "ASUS router memory low",
      "condition": "B",

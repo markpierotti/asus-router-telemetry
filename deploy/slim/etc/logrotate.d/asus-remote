@@ -1,6 +1,6 @@
 /var/log/asus/asus.log {
-    weekly
-    rotate 8
+    daily
+    rotate 30
     maxsize 50M
     missingok
     notifempty

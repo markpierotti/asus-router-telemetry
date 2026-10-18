@@ -1,10 +1,31 @@
 {
-  "_comment": "Devices the owner recognises. MACs as the AP sees them; IPs are DHCP reservations. Copy to ~hermes/network/known-devices.json.",
+  "_comment": "Devices the owner recognises. MACs as the AP sees them; IPs are DHCP reservations. Copy to ~hermes/network/known-devices.json. slim_ip is Slim's own LAN address (its SSH probes and collector logins are expected).",
+  "slim_ip": "192.0.2.10",
   "devices": [
-    {"name": "Slim (Ubuntu server)", "ip": "192.0.2.10", "mac": "02:00:5e:00:00:10"},
-    {"name": "ASUS access point", "ip": "192.0.2.20", "mac": null},
-    {"name": "Main gateway", "ip": "192.0.2.1", "mac": null},
-    {"name": "Games console", "ip": "192.0.2.30", "mac": "02:00:5e:00:00:30"},
-    {"name": "Laptop", "ip": "192.0.2.40", "mac": "02:00:5e:00:00:40"}
+    {
+      "name": "Slim (Ubuntu server)",
+      "ip": "192.0.2.10",
+      "mac": "02:00:5e:00:00:10"
+    },
+    {
+      "name": "ASUS access point",
+      "ip": "192.0.2.20",
+      "mac": null
+    },
+    {
+      "name": "Main gateway",
+      "ip": "192.0.2.1",
+      "mac": null
+    },
+    {
+      "name": "Games console",
+      "ip": "192.0.2.30",
+      "mac": "02:00:5e:00:00:30"
+    },
+    {
+      "name": "Laptop",
+      "ip": "192.0.2.40",
+      "mac": "02:00:5e:00:00:40"
+    }
   ]
 }

@@ -18,8 +18,10 @@ human contribution, assisted implementation and independent verification.
 
 The collector now runs every minute on Slim, a wired Ubuntu thin client, alongside
 Pi-hole, Prometheus and Grafana. Custom exporters connect DNS and router telemetry
-to dashboards and 13 alert rules; private backups are created on Slim and pulled
-to a Mac. Telegram notification delivery is still pending.
+to dashboards and 15 alert rules delivered to Telegram, with an external
+healthchecks.io heartbeat; private backups are created on Slim and pulled to a Mac.
+Pi-hole resolves through a local Unbound, the ASUS access point's syslog is kept on
+Slim, and a read-only Hermes agent adds alert follow-ups and a daily digest.
 
 The [17 October deployment record](docs/slim-deployment-20261017.md) separates
 commissioning results and operator-supplied live checks from work still awaiting

@@ -46,13 +46,19 @@ platforms:
       routes:
         grafana:
           script: grafana-alert.py
+          coalesce:              # related alerts within a minute -> one investigation
+            key: group
+            window_seconds: 60
+            max_wait_seconds: 180
           toolsets: [terminal, file]
           deliver: telegram
           deliver_extra:
             chat_id: 'CHAT_ID'
           mirror_to_session: true
           prompt: |
-            Slim's Grafana just raised the alert(s) below; the owner already received the raw
+            Slim's Grafana just raised the alert(s) below (everything that fired in the
+            last 10 minutes; treat related alerts as one incident and look for a shared
+            cause such as the gateway or upstream internet); the owner already received the raw
             alert on Telegram. Investigate read-only (Prometheus, systemctl, journalctl,
             dig, ping, /var/log/asus/asus.log) using as few commands as possible, then
             reply with a short follow-up in your incident format. If it has already

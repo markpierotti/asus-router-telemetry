@@ -40,6 +40,8 @@ tar -C / --ignore-failed-read -czf "$work/files.tar.gz" \
   usr/local/bin etc/pihole-exporter etc/ufw etc/unbound etc/rsyslog.d etc/logrotate.d/asus-remote \
   home/hermes/.hermes/config.yaml home/hermes/.hermes/SOUL.md home/hermes/.hermes/scripts \
   home/hermes/.hermes/cron/jobs.json home/hermes/network \
+  etc/systemd/system/hermes-gateway.service etc/systemd/system/hermes-gateway.service.d \
+  etc/systemd/system/asus-syslog-metrics.service etc/systemd/system/asus-syslog-metrics.timer \
   etc/apt/sources.list etc/apt/sources.list.d etc/apt/keyrings \
   etc/lightdm/lightdm.conf.d etc/xdg/autostart/rotate-screen.desktop \
   etc/sudoers.d/slim etc/ssh/sshd_config.d etc/default/grub etc/netplan \

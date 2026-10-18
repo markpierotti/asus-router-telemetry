@@ -25,7 +25,7 @@ df -h /
 
 Inspect target health, last scrape errors, freshness of collector timestamps and
 custom `*_exporter_up` values, not just HTTP success. In Grafana's alerting UI,
-check all 13 rules and their evaluation errors separately from notification status.
+check all 15 rules and their evaluation errors separately from notification status.
 The Pi-hole exporter emits client identities and queried domains: keep metrics,
 dashboards and screenshots private unless explicitly sanitized.
 
@@ -101,4 +101,4 @@ password-only version. Reporter and host pins still need verification.
 For a DNS outage, use your documented router DHCP/DNS recovery procedure and test
 a client after renewal. Do not experiment with network renderers over the only
 working SSH connection. For a complete Slim outage, inspect power and cabling;
-external alert delivery requires the still-pending independent uptime check.
+the healthchecks.io heartbeat reports the outage externally within about 15 minutes (5-minute pings, 10-minute grace).

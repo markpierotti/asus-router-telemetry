@@ -14,8 +14,19 @@ in-memory log and its restarts.
   AP's clock may be unset before NTP sync.
 - ufw: `514/udp ALLOW from <ASUS address>` (comment `ASUS-syslog`). No other host
   may send.
-- `deploy/slim/etc/logrotate.d/asus-remote`: weekly, 8 rotations, early rotation at
-  50 MB, compressed.
+- `deploy/slim/etc/logrotate.d/asus-remote`: daily, 30 rotations, early rotation at
+  50 MB, compressed (changed from weekly/8 after review, to match the original plan).
+- `usr/local/bin/asus-syslog-metrics` with `asus-syslog-metrics.{service,timer}`:
+  every minute, a sandboxed oneshot (root without capabilities, `adm` for reading,
+  writes only the node-exporter textfile directory and its state directory, no
+  network) counts lines, AP restarts, failed logins, logins from anywhere but Slim and
+  Wi-Fi-driver-error-like lines, and records when the log last grew
+  (`asus_syslog_*`). It shares no code path with Hermes, so it still works when the
+  agent is down. The driver-error pattern is heuristic and has no alert; it is
+  there for trends.
+- Alert `asus-syslog-silent`: no ASUS line for over an hour (5 minutes pending,
+  missing data alerts). Slim's blackbox SSH probe makes the AP log a line every
+  minute, so silence means delivery broke.
 - `slim-backup` includes `/etc/rsyslog.d` and `/etc/logrotate.d/asus-remote`. The
   log itself is not backed up.
 - rsyslog was not previously installed on Slim (journald only). Installing it also

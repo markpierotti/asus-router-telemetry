@@ -16,6 +16,7 @@ from pathlib import Path
 PROM = "http://127.0.0.1:9090/api/v1/query"
 NET = Path.home() / "network"
 NOW = time.time()
+SETTINGS = {"slim_ip": None}
 
 
 def q(expr):
@@ -49,10 +50,20 @@ def sh(*cmd):
         return ""
 
 
+def tail_lines(path, max_bytes):
+    """The last max_bytes of a file as lines (the first, possibly partial, line dropped)."""
+    with path.open("rb") as f:
+        size = f.seek(0, 2)
+        f.seek(max(0, size - max_bytes))
+        data = f.read().decode("utf-8", "replace")
+    lines = data.splitlines()
+    return lines[1:] if size > max_bytes else lines
+
+
 def recent_jsonl(path, hours=24):
     out, cutoff = [], datetime.now(timezone.utc) - timedelta(hours=hours)
     try:
-        for line in path.read_text().splitlines():
+        for line in tail_lines(path, 1_000_000):
             try:
                 d = json.loads(line)
                 if datetime.fromisoformat(d["ts"]) >= cutoff:
@@ -108,7 +119,13 @@ def main():
     print(f"- blocklists updated {ago(gravity)}")
 
     print("\n[DNS clients in 24h]")
-    known = {d["ip"]: d["name"] for d in json.loads((NET / "known-devices.json").read_text())["devices"]}
+    try:
+        cfg = json.loads((NET / "known-devices.json").read_text())
+        known = {d["ip"]: d["name"] for d in cfg.get("devices", []) if isinstance(d, dict) and d.get("ip")}
+        SETTINGS["slim_ip"] = cfg.get("slim_ip")
+    except (OSError, ValueError, AttributeError) as e:
+        known = {}
+        print(f"- (known-devices.json unreadable: {type(e).__name__}; every client shows UNKNOWN)")
     for r in sorted(q('pihole_client_queries_24h'), key=lambda r: -float(r["value"][1])):
         ip = r["metric"].get("client")
         tag = known.get(ip) or ("Slim itself" if ip == "127.0.0.1" else "UNKNOWN")
@@ -144,10 +161,10 @@ def main():
     for e in ev[-15:]:
         print(f"- {e['ts'][11:16]} {e['type']} {e.get('mac') or e.get('at') or e.get('line', '')[:120]}")
     try:
-        lines = Path("/var/log/asus/asus.log").read_text(errors="replace").splitlines()
+        lines = tail_lines(Path("/var/log/asus/asus.log"), 4_000_000)
         cutoff = (datetime.now().astimezone() - timedelta(hours=24)).isoformat()
         day = [l for l in lines if l[:19] >= cutoff[:19]]
-        noisy = sum("dropbear" in l and "192.0.2.10" in l for l in day)
+        noisy = sum("dropbear" in l and bool(SETTINGS["slim_ip"]) and SETTINGS["slim_ip"] in l for l in day)
         print(f"- {len(day)} log lines in 24h ({noisy} are Slim's own SSH probes)")
     except OSError as e:
         print(f"- ASUS log unreadable: {e}")
