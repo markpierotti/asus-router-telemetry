@@ -206,7 +206,7 @@ runs):
 | 21:15:00 | 21:15:44.474 | 21:15:44.918 | 0.444 s | 60.010 s | completed |
 | 21:16:00 | 21:16:44.462 | 21:16:44.914 | 0.452 s | 59.987 s | completed |
 
-- After the change, six consecutive gaps were 59.974–60.059 s. Before it, nine gaps
+- After the change, six consecutive gaps were 59.974–60.059 s. Before it, eight gaps
   from 20:52 to 21:08 were 119.921–120.098 s.
 - No run overlapped the previous one and none failed or recorded an error. Every
   delivery outcome was `suppressed`, the normal result when the watcher has nothing
