@@ -3,8 +3,8 @@
 Project lead: Mark Pierotti.
 
 The current source versions are reporter **1.0.5** and collector **1.6.2** (unreleased).
-Slim remains on deployed collector **1.6.0**. Source-only storage and loop-exit
-corrections, including the matching 1.6.2 service unit, remain pending deployment.
+Slim runs collector **1.6.2** with its matching service unit, deployed on
+18 October 2026 ([record](slim-collector-162-20261018.md)).
 The owner's separately reported 21:58 dashboard/interim-unit corrections are
 recorded in the deployment record.
 Claude implemented the key-auth change and commissioned the Slim services on

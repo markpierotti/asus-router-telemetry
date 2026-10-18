@@ -4,8 +4,9 @@
   collection/CLI failures remain **1**; one-shot failures retain their existing
   exit contract. Bad configuration is **2** and lock acquisition failures are **3**.
 - The matching systemd example uses `RestartPreventExitStatus=4 2`, retrying exits
-  1 and 3. Deploy this unit **together with 1.6.2**; both are pending deployment.
-  Slim still runs 1.6.0 with the owner's interim `RestartPreventExitStatus=1 2`.
+  1 and 3, and `KillMode=mixed` so an orderly stop can still clean up through the
+  ssh control master. 1.6.2 and this unit were deployed to Slim together on
+  18 October 2026 ([record](docs/slim-collector-162-20261018.md)).
 - Correct Pi-hole panel 8 to DNS request duration and legend `Pi-hole answer`,
   matching the owner's reported 21:58 live change; no host was accessed here.
 - Validate each raw backup-list filename before local path use, preserving lines
@@ -24,7 +25,7 @@
 - Added focused regression tests. Directory fsync remains best effort on systems
   that reject it; this is not a guarantee against every crash or storage failure.
 - Gemini supplied the observation; Codex checked it against source and implemented
-  this correction. It has **not** been deployed to Slim, which still runs 1.6.0.
+  this correction. It reached Slim as part of 1.6.2 on 18 October 2026.
 
 # Unreleased — Slim deployment and collector 1.6.0
 
