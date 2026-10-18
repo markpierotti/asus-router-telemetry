@@ -36,7 +36,7 @@ are supplied. Set and store web-administration credentials privately.
 | `usr/local/bin/rtax-exporter` | Read-only collector state and history metrics, loopback port 9618 |
 | `etc/prometheus/` and `etc/default/` | Scrapes, probes and loopback listeners; 30-day / 2 GB retention |
 | `etc/grafana/provisioning/` | Datasource, dashboard provider and 13 alert rules |
-| `var/lib/grafana/dashboards/` | Custom Pi-hole and ASUS dashboards |
+| `var/lib/grafana/dashboards/` | Custom Pi-hole, ASUS and Slim overview dashboards |
 | `etc/systemd/system/` | Collector/exporter units, backup timer and ICMP capability setup |
 | `usr/local/bin/slim-backup*` | Private archive creation and restricted SSH download protocol |
 | `macos/` | Daily backup pull and launchd example |

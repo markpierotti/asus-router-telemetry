@@ -30,7 +30,7 @@
     "vendor firmware and compiled reporter"
   ],
   "published_file_sha256": {
-    "README.md": "d2fc77dacffa183808905415ab4bb1272cc02622c78b4baeb74b808cffe9d38f",
+    "README.md": "c9736e880283984cdef00063798c37107446633cb490cb8f44e53616c5aec096",
     "etc/default/prometheus": "903d2b1a5c3b48dabac1704e514e2becb63f56d9ccc3ddc48bd3bf67252efb26",
     "etc/default/prometheus-blackbox-exporter": "361acfd80f0db9e302edd1d0ec6d01cbd7d4d712772b77333e8eb19329d6ba5a",
     "etc/default/prometheus-node-exporter": "4afa09e75e2b554c9ff3547f263cefcd4af765cde02d85add6d8882509d6f803",
@@ -59,6 +59,7 @@
     "usr/local/bin/slim-backup": "a47f55a5e11cc6bb8b4863d27276729d01c91b6d554e1aa5fa4938a57b51c9da",
     "usr/local/bin/slim-backup-serve": "bc9f0d6fa5c7a45542b96c484aab5bf2798a5e78930c1a27c03b6a42e591938b",
     "var/lib/grafana/dashboards/pihole.json": "617f09847cecde24e1950b49212102faa37a364e6b67650b6ae6de1c0683a552",
-    "var/lib/grafana/dashboards/router.json": "f80410bc87084b6dace4be451dacec838dd78f33c8824f4e6ad5b33b5ab13817"
+    "var/lib/grafana/dashboards/router.json": "f80410bc87084b6dace4be451dacec838dd78f33c8824f4e6ad5b33b5ab13817",
+    "var/lib/grafana/dashboards/slim-overview.json": "c0ba1b449f324723b69eb403a49be0c2d3cf93f6f66c5944cd87364e965f1756"
   }
 }
