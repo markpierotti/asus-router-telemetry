@@ -38,6 +38,7 @@ are supplied. Set and store web-administration credentials privately.
 | `etc/grafana/provisioning/` | Datasource, dashboard provider and 13 alert rules |
 | `var/lib/grafana/dashboards/` | Custom Slim overview, Pi-hole and ASUS dashboards (deploy and rollback: [operations runbook](../../docs/slim-operations.md)) |
 | `etc/systemd/system/` | Collector/exporter units, backup timer and ICMP capability setup |
+| `usr/local/bin/slim-dashboards` | Root-run dashboard backup and rollback helper for the provisioned dashboards |
 | `usr/local/bin/slim-backup*` | Private archive creation and restricted SSH download protocol |
 | `macos/` | Daily backup pull and launchd example |
 | `etc/pihole/` and `etc/grafana/*.example` | Minimal configuration excerpts to merge manually |

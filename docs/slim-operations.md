@@ -47,17 +47,31 @@ After resolving the cause, explicitly restart the service and confirm new sample
 The dashboards in `deploy/slim/var/lib/grafana/dashboards/` are loaded by the
 `Home lab` file provider. Edits made in the Grafana UI to a provisioned dashboard
 do not persist, and importing one with the same UID through the UI conflicts with
-it, so deploy by file. Run these on Slim, from the directory holding the new files.
-Deploy the overview first and look at it in Grafana before deploying the other two.
+it, so deploy by file. Run these on Slim, from a checkout of this repository that
+holds the new files. Deploy the overview first and look at it in Grafana before
+deploying the other two.
 
-Both procedures start with the same backup. Keep the `BACKUP` value: rollback needs it.
+Backups are root-owned and mode 0750, so an ordinary operator cannot even test
+whether a file exists in one: an unprivileged `[ -e ... ]` answers "absent" for a file
+that is there. Backup and rollback therefore go through
+`deploy/slim/usr/local/bin/slim-dashboards`, which escalates with `sudo` first and does
+every check and copy as root. Never test the backup directory yourself without `sudo`.
 
 ```sh
-STAMP=$(date +%Y%m%d-%H%M%S)
-BACKUP=/var/backups/grafana-dashboards-$STAMP
-sudo install -d -m 0750 "$BACKUP"
-sudo cp -a /var/lib/grafana/dashboards/. "$BACKUP"/
+D=deploy/slim/var/lib/grafana/dashboards
+SD="sh deploy/slim/usr/local/bin/slim-dashboards"
+LIVE=/var/lib/grafana/dashboards
+```
+
+### Backup (both procedures)
+
+The script refuses to back up unless `pihole.json` and `router.json` are present, and
+verifies the copy. Keep the printed path: rollback needs it.
+
+```sh
+BACKUP=$($SD backup)
 echo "$BACKUP"
+sudo ls -l "$BACKUP"
 ```
 
 ### A. Overview only
@@ -65,9 +79,9 @@ echo "$BACKUP"
 `slim-overview.json` needs no address edits. The other two dashboards are not touched.
 
 ```sh
-sudo cp slim-overview.json /var/lib/grafana/dashboards/slim-overview.json
-sudo chown --reference=/var/lib/grafana/dashboards/pihole.json /var/lib/grafana/dashboards/slim-overview.json
-sudo chmod --reference=/var/lib/grafana/dashboards/pihole.json /var/lib/grafana/dashboards/slim-overview.json
+sudo cp "$D/slim-overview.json" $LIVE/slim-overview.json
+sudo chown --reference=$LIVE/pihole.json $LIVE/slim-overview.json
+sudo chmod --reference=$LIVE/pihole.json $LIVE/slim-overview.json
 ```
 
 ### B. All three (overview, Pi-hole, Router)
@@ -77,11 +91,11 @@ point. Substitute the real one on Slim; never commit the real address.
 
 ```sh
 AP_IP=192.0.2.20   # replace with the real access-point address
-sudo cp slim-overview.json pihole.json /var/lib/grafana/dashboards/
-sed "s/192\.0\.2\.20/$AP_IP/g" router.json | sudo tee /var/lib/grafana/dashboards/router.json >/dev/null
+sudo cp "$D/slim-overview.json" "$D/pihole.json" $LIVE/
+sed "s/192\.0\.2\.20/$AP_IP/g" "$D/router.json" | sudo tee $LIVE/router.json >/dev/null
 for f in slim-overview pihole router; do
-  sudo chown --reference="$BACKUP/pihole.json" /var/lib/grafana/dashboards/$f.json
-  sudo chmod --reference="$BACKUP/pihole.json" /var/lib/grafana/dashboards/$f.json
+  sudo chown --reference="$LIVE/pihole.json" $LIVE/$f.json
+  sudo chmod --reference="$LIVE/pihole.json" $LIVE/$f.json
 done
 ```
 
@@ -91,7 +105,7 @@ Grafana re-reads the folder at the provider's update interval (10 seconds unless
 `updateIntervalSeconds` is set).
 
 ```sh
-ls -l /var/lib/grafana/dashboards
+ls -l $LIVE
 curl --fail --silent http://127.0.0.1:3000/api/health
 ```
 
@@ -101,27 +115,25 @@ broken query.
 
 ### Rollback
 
-Restore each file you deployed from the backup. A file that was not in the backup did
-not exist before, so it is removed instead; in particular `slim-overview.json` is
-deleted only when it was absent at backup time, and an earlier copy is put back when
-there was one. Set `FILES` to what you deployed: `slim-overview` for procedure A, all
-three for procedure B. Grafana removes a provisioned dashboard whose file is deleted
-unless `disableDeletion` is set on the provider.
+Name the dashboards you deployed: `slim-overview` for procedure A, all three for
+procedure B. Use the `BACKUP` path printed above, or `sudo ls -d /var/backups/grafana-dashboards-*`
+to find it.
 
 ```sh
-BACKUP=/var/backups/grafana-dashboards-YYYYMMDD-HHMMSS   # the value printed above
-FILES="slim-overview"                                    # or: slim-overview pihole router
-for f in $FILES; do
-  if [ -e "$BACKUP/$f.json" ]; then
-    sudo cp -a "$BACKUP/$f.json" /var/lib/grafana/dashboards/$f.json
-  else
-    sudo rm -f /var/lib/grafana/dashboards/$f.json
-  fi
-done
-curl --fail --silent http://127.0.0.1:3000/api/health
+$SD rollback "$BACKUP" slim-overview                    # after procedure A
+$SD rollback "$BACKUP" slim-overview pihole router      # after procedure B
 ```
 
-Pi-hole and Router have always existed, so they are always restored, never removed.
+The script does everything as root and changes nothing unless the checks pass. It
+aborts, leaving the live directory as it was, if the backup is missing, not a
+directory, unreadable, or not a valid backup (it must hold readable `pihole.json` and
+`router.json`, which existed before this change), or if a name is unknown. It restores
+each named dashboard that is in the backup. It deletes `slim-overview.json` only after
+confirming, as root, that a valid backup does not contain it, so the overview is removed
+only if it did not exist before and an earlier copy is put back if there was one.
+Pi-hole and Router always existed, so they are restored, and a backup missing one of
+them aborts rather than deleting it. Grafana removes a provisioned dashboard whose file
+is deleted unless `disableDeletion` is set on the provider.
 
 What was and was not checked for the current dashboard set is recorded in
 [slim-dashboards-20261019.md](slim-dashboards-20261019.md).

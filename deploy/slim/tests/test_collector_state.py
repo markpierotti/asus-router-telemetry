@@ -128,6 +128,16 @@ class CollectorStateTests(unittest.TestCase):
 
     def test_missing_freshness_with_failure_reports_failing_not_ok(self):
         self.check(FAILING, rtax_last_attempt_timestamp_seconds=None, rtax_last_attempt_success=0)
+        self.check(FAILING, rtax_last_attempt_timestamp_seconds=None, rtax_incident_open=1)
+
+    def test_missing_success_or_incident_with_a_failure_signal_reports_failing(self):
+        self.check(FAILING, rtax_last_attempt_success=None, rtax_incident_open=1)
+        self.check(FAILING, rtax_incident_open=None, rtax_last_attempt_success=0)
+
+    def test_missing_input_without_failure_signal_is_unavailable_not_failing(self):
+        self.check(UNAVAILABLE, rtax_last_attempt_timestamp_seconds=None)
+        self.check(UNAVAILABLE, rtax_last_attempt_success=None)
+        self.check(UNAVAILABLE, rtax_incident_open=None)
 
 
 if __name__ == '__main__':

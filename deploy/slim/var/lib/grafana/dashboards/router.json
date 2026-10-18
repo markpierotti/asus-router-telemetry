@@ -123,7 +123,7 @@
         "textMode": "value",
         "orientation": "auto"
       },
-      "description": "OK only when the scrape and exporter both report healthy, the last attempt is under 5 minutes old, it succeeded and no incident is open; every one of those metrics must be present. FAILING = last attempt failed or an incident is open. STALE = no attempt for more than 5 minutes. UNAVAILABLE = the scrape or exporter is down or missing, or any metric needed for OK is absent. Precedence: UNAVAILABLE, STALE, FAILING, OK. (systemd rtax-collector, key auth, every 60s.)"
+      "description": "OK only when the router scrape and exporter both report healthy (present and 1), the last attempt is under 5 minutes old, it succeeded and no incident is open; if any of those is missing the tile cannot show OK. UNAVAILABLE = the scrape or exporter is down or absent. STALE = no attempt for more than 5 minutes. FAILING = the last attempt failed or an incident is open (shown even if the freshness metric is missing). Missing success, freshness or incident data with nothing failing also shows UNAVAILABLE. Precedence: UNAVAILABLE, STALE, FAILING, OK. (systemd rtax-collector, key auth, every 60s.)"
     },
     {
       "id": 2,

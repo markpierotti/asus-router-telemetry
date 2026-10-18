@@ -15,11 +15,15 @@ network configuration changed.
   OK requires every input to be present and good: the router scrape `up` and
   `rtax_exporter_up` both exactly 1, the last attempt no more than five minutes old
   (the "Router collector stopped" alert threshold), `rtax_last_attempt_success` 1 and
-  `rtax_incident_open` 0. Precedence is UNAVAILABLE (scrape or exporter down or
-  absent), then STALE, then FAILING (failed attempt or open incident), then OK. Any
-  other case, such as a missing success, freshness or incident metric, falls to
-  UNAVAILABLE. An earlier revision tested only for zero values, so a missing health,
-  freshness or incident metric could fall through to OK.
+  `rtax_incident_open` 0. A missing input can therefore never produce OK.
+  Precedence is UNAVAILABLE (scrape or exporter down or absent), then STALE (attempt
+  older than five minutes), then FAILING (failed attempt or open incident), then OK.
+  The tile is not "UNAVAILABLE whenever anything is missing": a missing freshness
+  metric together with a failed attempt or an open incident reports FAILING, because
+  a failure signal is still present. A missing success, freshness or incident metric
+  with no failure signal falls through to UNAVAILABLE. An earlier revision tested only
+  for zero values, so a missing health, freshness or incident metric could fall
+  through to OK.
 - **Status and headline tiles use instant queries** and are gated on the scrape
   job's own `up` and the exporter's `*_exporter_up`, so a dead exporter blanks the
   tile (NO DATA) within a scrape interval instead of leaving its last value on screen.
@@ -60,6 +64,17 @@ Through a signed-in Grafana (version 13.2.4) and its query API, read-only:
   `promql_mini.py`) covering each metric missing on its own, exporter and scrape
   failure, stale and failed attempts, open incidents, recovery and state precedence.
   The state tests fail on the previous expression, which let missing metrics read OK.
+
+## Rollback helper
+
+`usr/local/bin/slim-dashboards` runs backup and rollback entirely as root, because the
+backup directory is root-owned 0750 and an unprivileged existence check cannot tell
+"absent" from "permission denied". Its tests run the real script as an unprivileged
+user against a root-owned backup with a sudo stand-in that does not elevate, and require
+an abort with the live dashboards untouched; they also cover the root-side behaviour
+(restore, delete only when absent from a valid backup, abort on a missing, empty or
+invalid backup or an unknown name). With a naive version of the script those tests
+fail. Not covered: a real `sudo` password prompt or sudoers policy, and any run on Slim.
 
 ## Not verified
 
