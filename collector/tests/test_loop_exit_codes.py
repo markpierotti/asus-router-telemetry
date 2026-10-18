@@ -47,3 +47,10 @@ class LoopExitTests(unittest.TestCase):
         self.assertEqual(blocked, {cli.EXIT_HARD_STOP, cli.EXIT_BAD_OPTION})
         self.assertNotIn(cli.EXIT_COLLECTION_FAILURE, blocked)
         self.assertNotIn(cli.EXIT_LOCK_HELD, blocked)
+
+    def test_example_unit_signals_only_the_collector_on_stop(self):
+        # The orderly stop removes the router work dir THROUGH the ssh control master,
+        # so systemd must not signal the master at the same time (KillMode=control-group).
+        root = Path(__file__).resolve().parents[2]
+        unit = (root / 'deploy/slim/etc/systemd/system/rtax-collector.service').read_text()
+        self.assertIn('KillMode=mixed', unit.splitlines())

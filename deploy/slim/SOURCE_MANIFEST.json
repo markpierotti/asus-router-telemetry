@@ -44,7 +44,7 @@
     "etc/prometheus/prometheus.yml": "ddfa04f4b87d8be27e92a5fe44e0e4c42f2150d6297a9e4bfa3f744266c47dfc",
     "etc/systemd/system/pihole-exporter.service": "f12ef52c7cab8e5240c46dac61ecedd2324a74300bc7931450109521502f366d",
     "etc/systemd/system/prometheus-blackbox-exporter.service.d/icmp.conf": "0ba23e0400bf37a902268b74dae7ac2111cdc7f248f1ba86f65d8ee73c4912d5",
-    "etc/systemd/system/rtax-collector.service": "357e0fbf41b1b1b8d31e6e56fd5b66f49a3a70dd9afbe870ab5e9bfeedec1970",
+    "etc/systemd/system/rtax-collector.service": "67316896b1a04db933cfe26b363f677cf88ada92aed319ea2fdfe32470f97846",
     "etc/systemd/system/rtax-exporter.service": "13134372f7b38cc85e9b783c5a3b37ae93f9425a1e09e91ecb6a557c12752313",
     "etc/systemd/system/slim-backup.service": "c7b48e9995ed7ca57007371f09a19feaef92ba8c85c9c00b9509cee184f8fcc8",
     "etc/systemd/system/slim-backup.timer": "7a206fb6f906f4692faf170fc0574a43581b46ed2cb3f46b02e178db3d438880",

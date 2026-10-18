@@ -9,7 +9,7 @@ Group=rtax
 WorkingDirectory=/home/rtax/app/collector
 # -E -s: ignore PYTHON* env and user site (not -I: that drops the script dir from sys.path)
 ExecStart=/usr/bin/python3 -E -s collector.py collect --loop --interval 60 --data-dir /home/rtax/data
-# Requires collector 1.6.2 (pending deployment); do not pair this unit with 1.6.0.
+# Requires collector 1.6.2 or later; do not pair this unit with 1.6.0.
 # 130 = orderly stop on SIGTERM. Exit 4 = loop host-key/artifact HARD STOP;
 # 2 = bad config: neither is retried. Exit 1 = other collection/CLI failure;
 # 3 = lock held or a storage error taking it: both are retried.
@@ -17,6 +17,9 @@ SuccessExitStatus=130
 Restart=on-failure
 RestartSec=60
 RestartPreventExitStatus=4 2
+# SIGTERM goes to the collector only; it removes its router work dir through the
+# ssh control master, then stops the master itself. Leftovers are SIGKILLed after.
+KillMode=mixed
 TimeoutStopSec=60
 NoNewPrivileges=yes
 PrivateTmp=yes
