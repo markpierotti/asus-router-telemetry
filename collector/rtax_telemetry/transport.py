@@ -6,8 +6,8 @@ launchers in ``the original private bench project`` (``run_reporter_test.sh``,
 
   * the pinned ``known_hosts`` file and its expected SHA-256
   * the reporter artifact and its expected SHA-256
-  * the ssh option set (password auth only, a single prompt, connect timeout,
-    server-alive keepalives)
+  * an explicit authentication choice (password mode with a single prompt, or
+    one configured key with no interactive fallback), connect timeout and keepalives
   * a router-side OpenSSL SHA-256 known-answer test and a required-tool gate
   * an exclusive ``mkdir -m 700`` remote temp dir with ownership tracking
   * a watchdog SELF-TEST on the target, proving the bound works before it is used
@@ -714,11 +714,16 @@ class SSHTransport:
                  watchdog_selftest_bound=3,
                  verify_artifact=True,
                  interactive_auth=None,
+                 identity_file=None,
                  max_stdout_bytes=DEFAULT_MAX_STDOUT,
                  max_stderr_bytes=DEFAULT_MAX_STDERR,
                  log=None):
         self.host = host
         self.user = user
+        # None -> password authentication typed at the terminal (the default).
+        # A path -> public-key authentication with exactly that private key and
+        # nothing else: no password, no agent, no terminal (unattended use).
+        self.identity_file = os.path.expanduser(identity_file) if identity_file else None
         self.artifact = os.path.expanduser(artifact)
         self.known_hosts = os.path.expanduser(known_hosts)
         self.artifact_sha = artifact_sha
@@ -759,6 +764,10 @@ class SSHTransport:
         This does NOT change the working pinned connection: the bench host has no
         ``~/.ssh/config``, and the transport already selects password-only
         authentication with a pinned ``known_hosts`` and ``StrictHostKeyChecking``.
+
+        Exactly ONE authentication method is ever offered (see ``_auth_opts``), so
+        a key-mode run can never fall back to a password prompt and a password-mode
+        run can never present a key from the agent or ``~/.ssh``.
         """
         return [
             "-F", "/dev/null",
@@ -767,9 +776,7 @@ class SSHTransport:
             "-o", "StrictHostKeyChecking=yes",
             "-o", "UpdateHostKeys=no",
             "-o", "KnownHostsCommand=none",
-            "-o", "PreferredAuthentications=password",
-            "-o", "PubkeyAuthentication=no",
-            "-o", "NumberOfPasswordPrompts=1",
+        ] + self._auth_opts() + [
             "-o", "ForwardAgent=no",
             "-o", "ClearAllForwardings=yes",
             "-o", "ProxyCommand=none",
@@ -777,6 +784,37 @@ class SSHTransport:
             "-o", "ConnectTimeout=%d" % self.connect_timeout,
             "-o", "ServerAliveInterval=5",
             "-o", "ServerAliveCountMax=3",
+        ]
+
+    @property
+    def key_auth(self):
+        return self.identity_file is not None
+
+    def _auth_opts(self):
+        """The authentication options: password XOR one pinned private key.
+
+        Key mode names the single ``IdentityFile`` with ``IdentitiesOnly=yes`` and
+        ``IdentityAgent=none``, so neither an agent nor a default key in ``~/.ssh``
+        can be offered, and turns password and keyboard-interactive authentication
+        off. ``BatchMode=yes`` means a passphrase-protected key, or a router that
+        rejects the key, fails at once as ``ssh_auth_failure`` instead of waiting
+        for a terminal that an unattended run does not have.
+        """
+        if self.key_auth:
+            return [
+                "-o", "PreferredAuthentications=publickey",
+                "-o", "PubkeyAuthentication=yes",
+                "-o", "PasswordAuthentication=no",
+                "-o", "KbdInteractiveAuthentication=no",
+                "-o", "IdentitiesOnly=yes",
+                "-o", "IdentityAgent=none",
+                "-o", "IdentityFile=%s" % self.identity_file,
+                "-o", "BatchMode=yes",
+            ]
+        return [
+            "-o", "PreferredAuthentications=password",
+            "-o", "PubkeyAuthentication=no",
+            "-o", "NumberOfPasswordPrompts=1",
         ]
 
     def _multiplexed_opts(self):
@@ -809,6 +847,8 @@ class SSHTransport:
             raise ArtifactMismatch(
                 "pinned known_hosts hash mismatch (%s != %s) - refusing"
                 % (k, self.known_hosts_sha))
+        if self.key_auth and not os.path.isfile(self.identity_file):
+            raise TransportAuthError("identity_file not found: %s" % self.identity_file)
         if not os.path.isfile(self.artifact):
             raise ArtifactMismatch("artifact not found: %s" % self.artifact)
         if self.verify_artifact:
@@ -1034,14 +1074,18 @@ class SSHTransport:
         # This is the ONLY call site allowed to hand over the terminal: interactive
         # authentication belongs to master establishment, never to a multiplexed
         # command.
+        #
+        # Key mode never takes the terminal: it authenticates with the pinned key
+        # under BatchMode, so it runs the same with or without one (unattended).
         has_tty = has_controlling_terminal()
         interactive = has_tty if self.interactive_auth is None else bool(self.interactive_auth)
-        if self.interactive_auth is None and not has_tty:
+        if self.key_auth:
+            interactive = False
+        elif self.interactive_auth is None and not has_tty:
             self.log("no controlling terminal: interactive password authentication is "
-                     "unavailable. Public-key authentication is DISABLED by this "
-                     "transport (PubkeyAuthentication=no), so an installed key alone "
-                     "would not enable unattended use - that needs its own implementation "
-                     "change, not just a key in authorized_keys.")
+                     "unavailable. Password mode DISABLES public-key authentication "
+                     "(PubkeyAuthentication=no); for unattended use configure "
+                     "identity_file, a key in authorized_keys alone is not used.")
         try:
             rc, _out, err = run_bounded(argv, self.connect_timeout + 20,
                                         interactive=interactive, log=self.log,
@@ -1069,7 +1113,8 @@ class SSHTransport:
                 "not answer%s - refusing to continue"
                 % (" (probe could not be completed)" if probe_failed else ""))
         self._master_pid = pid if (pid and pid > 0) else None
-        self.log("ssh master established to %s" % self._target())
+        self.log("ssh master established to %s (%s authentication)"
+                 % (self._target(), "public-key" if self.key_auth else "password"))
 
     def _rsh(self, cmd, timeout, stdin_bytes=None):
         """Run one command over the EXISTING control master."""

@@ -1,3 +1,49 @@
+# Unreleased — collector 1.6.2 and review corrections
+
+- Loop host-key/artifact hard stops now return **4** (`EXIT_HARD_STOP`). Ordinary
+  collection/CLI failures remain **1**; one-shot failures retain their existing
+  exit contract. Bad configuration is **2** and lock acquisition failures are **3**.
+- The matching systemd example uses `RestartPreventExitStatus=4 2`, retrying exits
+  1 and 3. Deploy this unit **together with 1.6.2**; both are pending deployment.
+  Slim still runs 1.6.0 with the owner's interim `RestartPreventExitStatus=1 2`.
+- Correct Pi-hole panel 8 to DNS request duration and legend `Pi-hole answer`,
+  matching the owner's reported 21:58 live change; no host was accessed here.
+- Validate each raw backup-list filename before local path use, preserving lines
+  without glob expansion; add offline traversal, download and retention tests.
+- Align the router placeholder and generic gateway labels, narrow durability and
+  commissioning-test claims, and record completed historical CI and Claude review.
+- Refresh deployment hashes and add a coverage/integrity test. Make the node
+  exporter's textfile directory explicit in the example; live verification remains
+  deferred because this change does not access Slim. Service hardening is deferred.
+
+# Unreleased — collector 1.6.1 storage correction
+
+- Sync the actual parent directory after an atomic write. Sample files live under
+  `samples/`; syncing only the top-level data directory did not flush their renamed
+  directory entries. State and pruned outcomes still sync the top-level directory.
+- Added focused regression tests. Directory fsync remains best effort on systems
+  that reject it; this is not a guarantee against every crash or storage failure.
+- Gemini supplied the observation; Codex checked it against source and implemented
+  this correction. It has **not** been deployed to Slim, which still runs 1.6.0.
+
+# Unreleased — Slim deployment and collector 1.6.0
+
+- Optional public-key authentication for unattended collection: `identity_file` in
+  `config.json` or `--identity-file`. Exactly one pinned key is offered under
+  `BatchMode` (no password, agent or default keys, no terminal handover); a
+  missing, relative, non-regular or group/world-accessible key file, or one combined
+  with `interactive_auth: true`, exits 2 before any attempt. Password mode is
+  unchanged and remains the default.
+- Key mode was deployed on Slim on 2026-10-17. The earlier Claude session reported
+  386 collector tests run on Slim; later operator output showed the service
+  running and producing samples. This does not extend the 1.5.5 bench acceptance.
+- Added sanitized monitoring/exporter/dashboard/alert/service/backup examples and
+  setup, operations and recovery documentation. Telegram delivery, controlled
+  reboot/endurance testing and restore validation remain pending.
+- See the [dated deployment record](docs/slim-deployment-20261017.md) for evidence
+  sources and limits. No new project release or tag is created by this branch.
+
+
 # v0.1.0 — Initial experimental release
 
 Component versions: collector **1.5.5**, reporter **1.0.5**, JSON schema

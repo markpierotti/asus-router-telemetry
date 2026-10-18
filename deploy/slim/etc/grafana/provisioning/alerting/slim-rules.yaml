@@ -1,0 +1,676 @@
+{
+ "apiVersion": 1,
+ "groups": [
+  {
+   "orgId": 1,
+   "name": "slim",
+   "folder": "Home lab",
+   "interval": "1m",
+   "rules": [
+    {
+     "uid": "pihole-dns-down",
+     "title": "Pi-hole DNS not answering",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "probe_success{job=\"dns_pihole\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "2m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "Pi-hole on slim isn't answering DNS: every device in the house will lose internet."
+     },
+     "labels": {
+      "severity": "critical"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "gateway-down",
+     "title": "Main gateway unreachable",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "probe_success{job=\"ping\",instance=\"192.0.2.1\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "3m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "slim can't ping the Main gateway (192.0.2.1)."
+     },
+     "labels": {
+      "severity": "critical"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "asus-ap-down",
+     "title": "ASUS access point unreachable",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "probe_success{job=\"ping\",instance=\"192.0.2.20\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "3m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "slim can't ping the ASUS RT-AX56U (192.0.2.20)."
+     },
+     "labels": {
+      "severity": "critical"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "internet-down",
+     "title": "Internet down",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "max(probe_success{job=\"http\"} or probe_success{job=\"ping\",instance=\"1.1.1.1\"})",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "5m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "slim can't reach 1.1.1.1, google.com or archive.ubuntu.com: the broadband link looks down."
+     },
+     "labels": {
+      "severity": "critical"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "disk-filling",
+     "title": "slim disk over 85%",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "100 * (1 - node_filesystem_avail_bytes{instance=\"slim\",mountpoint=\"/\"} / node_filesystem_size_bytes{instance=\"slim\",mountpoint=\"/\"})",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            85
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "10m",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "slim's root disk is over 85% full."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "memory-low",
+     "title": "slim memory low",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "100 * node_memory_MemAvailable_bytes{instance=\"slim\"} / node_memory_MemTotal_bytes{instance=\"slim\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            10
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "10m",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "slim has under 10% memory available."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "backup-stale",
+     "title": "slim backup overdue",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "(time() - slim_backup_last_success_timestamp_seconds) / 3600",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            30
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "10m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "No successful nightly backup on slim for over 30 hours (sudo systemctl status slim-backup)."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "blocklist-stale",
+     "title": "Pi-hole blocklist not updated",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "(time() - pihole_gravity_updated_timestamp_seconds) / 86400",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            9
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "1h",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "Pi-hole's blocklist hasn't refreshed in over 9 days (the weekly Sunday update failed)."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "router-collector-stale",
+     "title": "Router collector stopped",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "(time() - rtax_last_attempt_timestamp_seconds) / 60",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            5
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "2m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "The router collector hasn't run for over 5 minutes. A host-key or artifact check failure stops it on purpose: check `systemctl status rtax-collector` before restarting."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "router-collection-incident",
+     "title": "Router collection failing",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "rtax_incident_open",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "0s",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "The router collector has failed 3 times in a row (it resolves after 2 successes). Latest: see the Router dashboard."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "router-rebooted",
+     "title": "ASUS router rebooted",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "changes(rtax_router_boot_time_seconds[15m])",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "0s",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "The ASUS RT-AX56U's boot identity changed: it rebooted in the last 15 minutes."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "router-memory-low",
+     "title": "ASUS router memory low",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "100 * rtax_router_memory_bytes{type=\"MemAvailable\"} / ignoring(type) rtax_router_memory_bytes{type=\"MemTotal\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            10
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "15m",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "The ASUS RT-AX56U has under 10% memory available."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "scrape-target-down",
+     "title": "Monitoring target down",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "up",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "5m",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "Prometheus can't scrape {{ $labels.job }} ({{ $labels.instance }}): an exporter on slim has stopped."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    }
+   ]
+  }
+ ]
+}

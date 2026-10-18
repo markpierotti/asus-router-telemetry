@@ -139,10 +139,10 @@ class Store:
                 pass
 
     # -------------------------------------------------------- write helpers
-    def _fsync_dir(self):
+    def _fsync_dir(self, directory):
         """Flush the directory entry so a rename survives a crash."""
         try:
-            dfd = os.open(str(self.dir), os.O_RDONLY)
+            dfd = os.open(str(directory), os.O_RDONLY)
         except OSError:
             return
         try:
@@ -168,7 +168,7 @@ class Store:
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(str(tmp), str(path))
-            self._fsync_dir()
+            self._fsync_dir(path.parent)
         except OSError as e:
             try:
                 os.unlink(str(tmp))

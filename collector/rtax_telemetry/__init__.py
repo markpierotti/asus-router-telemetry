@@ -1,4 +1,4 @@
-"""rtax_telemetry — Mac-side telemetry collector for the ASUS RT-AX56U bench unit.
+"""rtax_telemetry — external-host telemetry collector for the ASUS RT-AX56U.
 
 Foundational layer for a home SOC. Foreground only: it never installs a service,
 a cron job, an agent or an LLM call. Healthy collection is pure code — no model
@@ -18,6 +18,6 @@ status      the human-readable status command
 cli         argument parsing / process entry points
 """
 
-COLLECTOR_VERSION = "1.5.5"
+COLLECTOR_VERSION = "1.6.2"
 SAMPLE_SCHEMA = "rtax_telemetry.sample/1"
 STATE_SCHEMA = "rtax_telemetry.state/1"

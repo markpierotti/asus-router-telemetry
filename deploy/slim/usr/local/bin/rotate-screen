@@ -1,0 +1,7 @@
+#!/bin/sh
+# Monitor is mounted upside down: rotate X displays 180 degrees.
+# Skip remote (xrdp) sessions and headless boots; never fail, or lightdm aborts.
+[ -n "$XRDP_SESSION" ] && exit 0
+xrandr --query 2>/dev/null | grep -q " connected" || exit 0
+xrandr -o inverted || true
+exit 0

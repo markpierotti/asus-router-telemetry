@@ -16,16 +16,21 @@ human contribution, assisted implementation and independent verification.
 
 ## Part of a larger home lab
 
-This is the first completed component of my planned home networking and security
-lab: collecting bounded, validated device telemetry and preserving
-evidence when a management connection fails. Next stages will explore Linux-hosted
-collection, network segmentation, traffic visibility and detection engineering.
-The [home-lab roadmap](docs/home-lab-roadmap.md) separates this released milestone
-from the planned work, including Project Limbo and security-operations exercises.
+The collector now runs every minute on Slim, a wired Ubuntu thin client, alongside
+Pi-hole, Prometheus and Grafana. Custom exporters connect DNS and router telemetry
+to dashboards and 13 alert rules; private backups are created on Slim and pulled
+to a Mac. Telegram notification delivery is still pending.
+
+The [17 October deployment record](docs/slim-deployment-20261017.md) separates
+commissioning results and operator-supplied live checks from work still awaiting
+validation. [Deployment examples](deploy/slim/README.md) and an
+[operations runbook](docs/slim-operations.md) make the setup inspectable.
+The [home-lab roadmap](docs/home-lab-roadmap.md) covers the next stages, including
+Hermes, Project Limbo, segmentation and detection exercises.
 
 ## Measured results
 
-Current accepted bench pair: **collector 1.5.5 / reporter 1.0.5**, on stock
+Historical accepted bench pair: **collector 1.5.5 / reporter 1.0.5**, on stock
 firmware 3.0.0.4.386_45898 and Linux 4.1.52 armv7l.
 
 | Trial | Observed result |
@@ -58,9 +63,16 @@ flowchart LR
     S --> C[Ownership and cleanup evidence]
 ```
 
-The collector checks pinned host identity and artifact hashes, creates an exclusive
-temporary directory, proves its watchdog can terminate a long job, and bounds
-execution and received output. Cleanup uncertainty survives later successful
+At session startup, the collector establishes one SSH ControlMaster and creates
+an owned temporary directory. Before transferring the reporter, it runs a long-job
+watchdog self-test on the target and requires a timer-fired marker, SIGKILL status
+and elapsed-time evidence. It then uploads and hash-checks the reporter once for
+that session. Each loop tick reuses the session and reporter; teardown removes the
+owned directory and verifies control-master shutdown. Transport failures can end
+the session, with a new provision required on reconnection.
+
+The collector checks pinned host identity and artifact hashes and bounds execution
+and received output. Cleanup uncertainty survives later successful
 collection. An unreachable management address is reported as a collection failure;
 it does not establish that the router itself is down.
 
@@ -88,6 +100,29 @@ JSON and process handling; actual Linux `/proc` telemetry requires Linux. Run th
 suite serially; the [collector instructions](collector/README.md) explain terminal
 requirements and environment-dependent test limitations.
 
+<details>
+<summary>Example: excerpt from an offline mock sample</summary>
+
+This excerpt was generated with the mock command above. It omits fields and is not
+itself a complete schema-valid sample. On the first sample, CPU utilisation is
+unknown because there are no previous counters; the aggregate is `null`.
+
+```json
+{
+  "schema": "rtax_telemetry.sample/1",
+  "collector_version": "1.6.2",
+  "outcome": "success",
+  "derived": {
+    "cpu_utilisation": {
+      "state": "first",
+      "aggregate": null
+    }
+  }
+}
+```
+
+</details>
+
 ## Build and live use
 
 `sh build-arm.sh` requires Docker with linux/amd64 support. The base image is pinned
@@ -98,14 +133,25 @@ the historical executable.
 For live use, follow the [collector configuration instructions](collector/README.md)
 and supply your own target, trusted host keys and artifact hashes. No live target
 is configured by default. Collection uploads and executes a temporary userspace
-program; it does not flash firmware or install persistent software.
+program; it does not flash firmware or install persistent software on the router.
+Unattended setup separately installs persistent host services and authorizes a
+router public key; those are explicit commissioning steps.
 
 ## Scope and publication
 
-Multi-hour reliability, unattended authentication, power-loss/reboot recovery,
-AP operation and USB NAS performance remain unvalidated. The collector is a
-foreground tool, with no scheduled service, alerts or automatic remediation. This
-milestone does not establish a deployed SOC or whole-network traffic visibility.
+Collector **1.6.0** adds explicit key authentication. The accompanying Slim example
+runs it under systemd, with external exporters and Grafana alert evaluation.
+At the 17 October live check, the collector was still producing samples about four
+hours after startup. This is an observation, not a controlled endurance trial.
+This branch contains undeployed **1.6.2**, including the storage correction and
+a distinct loop hard-stop exit code. Deploy its matching service unit together
+with the collector; see the [review dispositions](docs/slim-review-triage-20261017.md).
+The earlier v0.1.0 release and its v1.5.5 bench acceptance remain unchanged.
+
+Controlled reboot/power-loss recovery, a backup restore rehearsal, external alert
+delivery, USB NAS performance and whole-network visibility remain unvalidated.
+ASUS AP mode is in use; segmentation, Suricata and Project Limbo remain planned.
+There is no automatic remediation or deployed SOC claim.
 
 Credentials, actual host keys, private configuration, raw history, vendor firmware
 and extracted proprietary binaries are excluded. Local agent worktrees are ignored.

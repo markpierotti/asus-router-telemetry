@@ -17,6 +17,7 @@ import math
 import os
 import re
 import signal
+import stat
 import sys
 import time
 import traceback
@@ -61,6 +62,7 @@ EXIT_OK = 0
 EXIT_COLLECTION_FAILURE = 1
 EXIT_BAD_OPTION = 2
 EXIT_LOCK_HELD = 3
+EXIT_HARD_STOP = 4
 EXIT_CLEANUP_FAILURE = 5
 EXIT_EVIDENCE_NOT_PERSISTED = 6
 EXIT_INTERRUPTED = 130
@@ -154,7 +156,7 @@ CONFIG_KEYS = frozenset((
     "data_dir", "host", "user", "ssh", "artifact", "artifact_sha", "known_hosts",
     "known_hosts_sha", "connect_timeout", "run_bound", "control_persist",
     "watchdog_selftest", "watchdog_selftest_bound", "interactive_auth",
-    "max_stdout_bytes", "max_stderr_bytes", "retain_samples", "retain_outcomes",
+    "identity_file", "max_stdout_bytes", "max_stderr_bytes", "retain_samples", "retain_outcomes",
     "retain_sample_bytes", "retain_outcome_bytes", "max_sample_bytes",
     "open_after", "resolve_after", "interval",
 ))
@@ -288,6 +290,7 @@ def build_transport(args, cfg):
         watchdog_selftest=cfg_get(args, cfg, "watchdog_selftest", True),
         watchdog_selftest_bound=cfg_get(args, cfg, "watchdog_selftest_bound", 3),
         interactive_auth=cfg_get(args, cfg, "interactive_auth", None),
+        identity_file=cfg_get(args, cfg, "identity_file", None),
         max_stdout_bytes=cfg_get(args, cfg, "max_stdout_bytes", DEFAULT_MAX_STDOUT),
         max_stderr_bytes=cfg_get(args, cfg, "max_stderr_bytes", DEFAULT_MAX_STDERR),
         log=log,
@@ -377,6 +380,35 @@ def known_hosts_sha_error(value):
     return None
 
 
+def identity_file_error(value, interactive_auth):
+    """Why ``identity_file`` is unusable, or None.
+
+    null (the default) keeps password authentication. Otherwise it must be the
+    ABSOLUTE path of an existing regular file that no group or other user can read
+    or write (ssh would refuse it anyway, with a less useful message), and it
+    cannot be combined with ``interactive_auth: true``: key mode never prompts.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or not os.path.isabs(value):
+        return ("identity_file must be an absolute path to a private key, or null "
+                "for password authentication (got %s)" % sanitize_detail(repr(value), 120))
+    if interactive_auth is True:
+        return ("identity_file selects public-key authentication, which never prompts; "
+                "remove interactive_auth: true")
+    try:
+        st = os.stat(value)
+    except OSError as e:
+        return "identity_file %s cannot be read (%s)" % (
+            sanitize_detail(value, 200), sanitize_detail(e.strerror or e, 80))
+    if not stat.S_ISREG(st.st_mode):
+        return "identity_file %s is not a regular file" % sanitize_detail(value, 200)
+    if st.st_mode & 0o077:
+        return ("identity_file %s is accessible by group or others (mode %o); "
+                "chmod 600 it" % (sanitize_detail(value, 200), stat.S_IMODE(st.st_mode)))
+    return None
+
+
 def build_collector(args, cfg, transport, store, host_label):
     return Collector(
         transport, store,
@@ -411,6 +443,11 @@ def cmd_collect(args):
         if why:
             log("FATAL: %s. Set it to the file's SHA-256, or to false to run "
                 "without the check (a warning is logged on every run)" % why)
+            return EXIT_BAD_OPTION
+        why = identity_file_error(cfg_get(args, cfg, "identity_file", None),
+                                  cfg_get(args, cfg, "interactive_auth", None))
+        if why:
+            log("FATAL: %s" % why)
             return EXIT_BAD_OPTION
     store = build_store(args, cfg)
     try:
@@ -545,7 +582,7 @@ def run_loop(collector, store, interval):
                 # of a mismatch it will never recover from by itself.
                 log("HARD STOP: %s is not retryable - stopping the loop without further "
                     "attempts" % attempt["outcome"])
-                return EXIT_COLLECTION_FAILURE
+                return EXIT_HARD_STOP
             i += 1
             target = base + i * interval
             now = time.monotonic()
@@ -714,9 +751,14 @@ def add_transport(p):
                    default=None, help="force interactive terminal authentication")
     p.add_argument("--no-interactive-auth", dest="interactive_auth", action="store_false",
                    default=None, help="never take over the terminal for a password prompt. "
-                                      "This transport DISABLES public-key authentication "
+                                      "Password mode DISABLES public-key authentication "
                                       "(PubkeyAuthentication=no), so with no interactive "
-                                      "prompt a NEW master cannot be established at all")
+                                      "prompt a NEW master cannot be established at all; "
+                                      "use --identity-file for unattended runs")
+    p.add_argument("--identity-file", dest="identity_file", default=None,
+                   help="absolute path of a private key (mode 600, no passphrase): "
+                        "public-key authentication with that key only, never a "
+                        "password prompt (default: password authentication)")
     p.add_argument("--max-stdout-bytes", type=int, default=None,
                    help="device stdout byte ceiling (default %d)" % DEFAULT_MAX_STDOUT)
     p.add_argument("--max-stderr-bytes", type=int, default=None,

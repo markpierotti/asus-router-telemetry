@@ -1,6 +1,6 @@
 {
   "_comment": "Copy to <data-dir>/config.json; replace all example values. Documentation address only. Never store passwords here.",
-  "host": "192.0.2.1",
+  "host": "192.0.2.20",
   "user": "routeradmin",
   "artifact": "/absolute/path/to/out/router_health_arm",
   "known_hosts": "/absolute/path/to/reviewed/known_hosts",
@@ -21,5 +21,6 @@
   "max_stderr_bytes": 262144,
   "watchdog_selftest": true,
   "watchdog_selftest_bound": 3,
-  "interactive_auth": null
+  "interactive_auth": null,
+  "identity_file": null
 }

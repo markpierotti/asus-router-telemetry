@@ -1,0 +1,24 @@
+#!/bin/sh
+# Copy new nightly backups from slim to ~/Backups/slim (read-only key; see
+# /usr/local/bin/slim-backup-serve on slim). Keeps the newest 30. Run by launchd.
+umask 077
+LC_ALL=C
+export LC_ALL
+DEST="$HOME/Backups/slim"
+KEEP=30
+SSH="ssh -i $HOME/.ssh/slim_backup -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=10 slim@192.0.2.10"
+mkdir -p "$DEST"
+list=$($SSH list) || { echo "$(date): slim unreachable" >&2; exit 1; }
+printf '%s\n' "$list" | while IFS= read -r f; do
+  case "$f" in
+    slim-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].tar.gz) ;;
+    *) echo "$(date): rejected invalid backup name" >&2; continue ;;
+  esac
+  [ -f "$DEST/$f" ] && continue
+  if $SSH get "$f" > "$DEST/.$f.part" && gzip -t "$DEST/.$f.part"; then
+    mv "$DEST/.$f.part" "$DEST/$f" && echo "$(date): pulled $f"
+  else
+    rm -f "$DEST/.$f.part"; echo "$(date): failed $f" >&2
+  fi
+done
+ls -1t "$DEST"/slim-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do rm -f "$old"; done

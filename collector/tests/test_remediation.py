@@ -896,7 +896,7 @@ class TestHardStop(TempCase):
         store = self.store()
         c = Collector(HostKeyThenSuccess(), store, log=lambda *a: None)
         rc = run_loop(c, store, 0.1)
-        self.assertEqual(rc, 1, "the loop did not stop on a hard stop")
+        self.assertEqual(rc, cli.EXIT_HARD_STOP, "the loop did not stop on a hard stop")
         self.assertEqual(len(store.outcomes()), 1,
                          "the loop kept going after a host-key mismatch")
 
