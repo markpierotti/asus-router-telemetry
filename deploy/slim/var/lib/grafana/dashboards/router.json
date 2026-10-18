@@ -35,7 +35,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(vector(3) and on() ((min(up{job=\"router\"}) == 0) or (min(rtax_exporter_up) == 0))) or (vector(2) and on() (max(time() - rtax_last_attempt_timestamp_seconds) > 300)) or (vector(1) and on() ((max(rtax_last_attempt_success) == 0) or (max(rtax_incident_open) == 1))) or (vector(0) and on() (max(rtax_last_attempt_success) == 1)) or vector(3)",
+          "expr": "(vector(3) and on() (absent(up{job=\"router\"}) or absent(rtax_exporter_up) or (min(up{job=\"router\"}) < 1) or (min(rtax_exporter_up) < 1))) or (vector(2) and on() (max(time() - rtax_last_attempt_timestamp_seconds) > 300)) or (vector(1) and on() ((min(rtax_last_attempt_success) < 1) or (max(rtax_incident_open) > 0))) or (vector(0) and on() (min(up{job=\"router\"}) == 1) and on() (min(rtax_exporter_up) == 1) and on() (max(time() - rtax_last_attempt_timestamp_seconds) <= 300) and on() (min(rtax_last_attempt_success) == 1) and on() (max(rtax_incident_open) == 0)) or vector(3)",
           "instant": true,
           "range": false
         }
@@ -123,7 +123,7 @@
         "textMode": "value",
         "orientation": "auto"
       },
-      "description": "OK = last attempt succeeded and is fresh. FAILING = last attempt failed or an incident is open. STALE = no attempt for more than 5 minutes. UNAVAILABLE = the router exporter is down or reporting nothing. (systemd rtax-collector, key auth, every 60s.)"
+      "description": "OK only when the scrape and exporter both report healthy, the last attempt is under 5 minutes old, it succeeded and no incident is open; every one of those metrics must be present. FAILING = last attempt failed or an incident is open. STALE = no attempt for more than 5 minutes. UNAVAILABLE = the scrape or exporter is down or missing, or any metric needed for OK is absent. Precedence: UNAVAILABLE, STALE, FAILING, OK. (systemd rtax-collector, key auth, every 60s.)"
     },
     {
       "id": 2,
@@ -1064,5 +1064,6 @@
       "title": "Home lab",
       "type": "dashboards"
     }
-  ]
+  ],
+  "version": 1
 }

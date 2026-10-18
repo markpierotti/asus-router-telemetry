@@ -11,10 +11,15 @@ network configuration changed.
   Pi-hole, internet and router-collector status; charts for CPU by mode, memory,
   network, DNS rate, latency and disk I/O. Queries name the real jobs (`node`,
   `pihole`, `ping`, `http`, `dns_pihole`, `router`) and use no template variables.
-- **Router collector tile** reports four states: OK, FAILING (last attempt failed or
-  an incident is open), STALE (no attempt for over five minutes, the same threshold
-  as the "Router collector stopped" alert) and UNAVAILABLE (exporter down or no
-  data). Missing data falls through to UNAVAILABLE, never to OK.
+- **Router collector tile** reports four states: OK, FAILING, STALE and UNAVAILABLE.
+  OK requires every input to be present and good: the router scrape `up` and
+  `rtax_exporter_up` both exactly 1, the last attempt no more than five minutes old
+  (the "Router collector stopped" alert threshold), `rtax_last_attempt_success` 1 and
+  `rtax_incident_open` 0. Precedence is UNAVAILABLE (scrape or exporter down or
+  absent), then STALE, then FAILING (failed attempt or open incident), then OK. Any
+  other case, such as a missing success, freshness or incident metric, falls to
+  UNAVAILABLE. An earlier revision tested only for zero values, so a missing health,
+  freshness or incident metric could fall through to OK.
 - **Status and headline tiles use instant queries** and are gated on the scrape
   job's own `up` and the exporter's `*_exporter_up`, so a dead exporter blanks the
   tile (NO DATA) within a scrape interval instead of leaving its last value on screen.
@@ -40,14 +45,21 @@ Through a signed-in Grafana (version 13.2.4) and its query API, read-only:
 
 - 22 overview queries and 33 Pi-hole and Router queries ran without error and
   returned live series.
-- The Router collector expression was exercised with forced variants of its
-  conditions, not only the live OK case.
+- The Router collector expression was evaluated for all 324 combinations of
+  scrape `up` (missing, 0, 1), exporter health (missing, 0, 1), attempt age (missing,
+  30, 300, 301 seconds), success (missing, 0, 1) and incident (missing, 0, 1), by
+  substituting synthetic series into the real expression and running it on the live
+  Prometheus engine. The states matched the offline evaluator in every case
+  (2 OK, 15 FAILING, 9 STALE, 298 UNAVAILABLE).
 - The CPU tile and the stacked CPU chart total returned the same value from the
   same data (4.621 against 4.621 at the time of the check).
 - The `df`-style and size-based root filesystem formulas differ by the
   root-reserved blocks (54.59% against 56.93% at the time of the check).
-- `make test-deployment` includes new static checks (`test_dashboards.py`) that fail
-  on the previous dashboard versions.
+- `make test-deployment` includes static checks (`test_dashboards.py`) and behavioral
+  state tests (`test_collector_state.py`, using the subset evaluator in
+  `promql_mini.py`) covering each metric missing on its own, exporter and scrape
+  failure, stale and failed attempts, open incidents, recovery and state precedence.
+  The state tests fail on the previous expression, which let missing metrics read OK.
 
 ## Not verified
 
