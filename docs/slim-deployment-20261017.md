@@ -60,7 +60,8 @@ private-development history. Deployed component versions are collector **1.6.0**
 **1.0.5**, schema `router_health/2`; the historical project tag **v0.1.0** is unchanged. This publication branch also
 contains undeployed collector **1.6.2**, including the 1.6.1 sample-directory sync
 correction and a dedicated loop hard-stop exit code. Version 1.6.2 and its matching
-service unit are **pending deployment**.
+service unit were then **pending deployment** (deployed 18 October 2026; see
+[the 1.6.2 record](slim-collector-162-20261018.md)).
 
 The collector runs under the unprivileged `rtax` account every 60 seconds. Its
 private key is `/home/rtax/keys/id_ed25519`, with no password or agent fallback.
@@ -68,7 +69,7 @@ Pinned host-key and reporter-hash checks remain enforced. In the **1.6.2 reposit
 example**, exit 4 means a loop identity/artifact hard stop and exit 2 means bad
 configuration; neither is restarted. Exit 1 covers other collection/CLI failures,
 and exit 3 covers a held lock or storage error taking it; both are retried.
-This code/unit pair is not deployed.
+This code/unit pair was deployed on 18 October 2026.
 The previous application directory was retained during commissioning for rollback.
 
 At **21:58 AEST on 17 October**, the owner reported two live corrections, backed

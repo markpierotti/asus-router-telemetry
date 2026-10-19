@@ -1,0 +1,66 @@
+#!/usr/bin/python3
+"""Bounded local probes and external heartbeat; never log the secret URL."""
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+from urllib.request import urlopen
+
+SECRET = Path('/etc/slim-secrets/healthchecks_url')
+
+
+def http_ok(url, grafana=False):
+    try:
+        with urlopen(url, timeout=5) as response:
+            body = response.read(65537)
+            if response.status != 200 or len(body) > 65536:
+                return False
+            return not grafana or json.loads(body).get('database') == 'ok'
+    except Exception:
+        return False
+
+
+def dns_ok():
+    try:
+        result = subprocess.run(
+            ['/usr/bin/dig', '+time=2', '+tries=1', '@127.0.0.1', 'example.com', 'A'],
+            capture_output=True, text=True, timeout=5)
+        return (result.returncode == 0 and 'status: NOERROR,' in result.stdout
+                and re.search(r'ANSWER: [1-9][0-9]*', result.stdout) is not None)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def notify(healthy):
+    try:
+        url = SECRET.read_text().strip()
+        if not re.fullmatch(r'https://(?:hc-ping\.com|ping\.healthchecks\.io)/[0-9a-fA-F-]{36}', url):
+            print('heartbeat: missing or invalid URL configuration', file=sys.stderr)
+            return False
+        if not healthy:
+            url += '/fail'
+        # URL is stdin configuration, absent from process arguments and logs.
+        result = subprocess.run(
+            ['/usr/bin/curl', '--disable', '--silent', '--fail', '--proto', '=https',
+             '--connect-timeout', '5', '--max-time', '10', '--retry', '2',
+             '--retry-max-time', '25', '--output', '/dev/null', '--config', '-'],
+            input='url = "' + url + '"\n', text=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def main():
+    checks = {'pihole_dns': dns_ok(),
+              'prometheus': http_ok('http://127.0.0.1:9090/-/ready'),
+              'grafana': http_ok('http://127.0.0.1:3000/api/health', grafana=True)}
+    healthy = all(checks.values())
+    sent = notify(healthy)
+    print('heartbeat: ' + json.dumps({'checks': checks, 'healthy': healthy, 'delivered': sent}))
+    return 0 if healthy and sent else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

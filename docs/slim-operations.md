@@ -25,7 +25,7 @@ df -h /
 
 Inspect target health, last scrape errors, freshness of collector timestamps and
 custom `*_exporter_up` values, not just HTTP success. In Grafana's alerting UI,
-check all 13 rules and their evaluation errors separately from notification status.
+check all 16 rules and their evaluation errors separately from notification status.
 The Pi-hole exporter emits client identities and queried domains: keep metrics,
 dashboards and screenshots private unless explicitly sanitized.
 
@@ -101,4 +101,75 @@ password-only version. Reporter and host pins still need verification.
 For a DNS outage, use your documented router DHCP/DNS recovery procedure and test
 a client after renewal. Do not experiment with network renderers over the only
 working SSH connection. For a complete Slim outage, inspect power and cabling;
-external alert delivery requires the still-pending independent uptime check.
+the healthchecks.io heartbeat reports the outage externally within about 15 minutes (5-minute pings, 10-minute grace).
+
+## Fixed ASUS log storage
+
+Remote ASUS logs must live on the separate 256 MiB ext4 image mounted at
+`/var/log/asus`. Daily logrotate's `maxsize` is only checked when logrotate runs;
+it cannot enforce a disk budget between runs. The preallocated image includes
+current logs, rotated logs and filesystem metadata in one budget. When it fills,
+UDP logs can be lost until space is freed, while the remaining root disk stays
+available. The original allowlist and file permissions still apply. Internal
+rsyslog errors are rate limited and stderr has a per-process cap; see the
+[rsyslog global options](https://docs.rsyslog.com/doc/rainerscript/global.html).
+
+Migration needs a short syslog outage. Take a root-only configuration/state backup
+first. Stop rsyslog **and its activating syslog.socket**, the syslog metrics
+timer/service and Hermes gateway while
+copying so neither incremental reader advances its offset during migration.
+Create the image with `sudo slim-syslog-storage create`: it refuses existing,
+sparse, wrong-sized or insecure images and requires a 1 GiB free-space reserve.
+Formatting disables discard and lazy metadata initialization to preserve that
+reservation. Do not run fstrim against this loop filesystem: discarding free image
+blocks removes the reservation and the next guard check will refuse it.
+Never automatically recreate a missing or damaged image during service startup.
+
+Move the old `/var/log/asus` directory to a timestamped root-only backup location.
+Create an **empty root-owned mode 000** directory at `/var/log/asus`; this is the
+underlying directory, not the root directory inside the image. Install the mount
+unit, rsyslog drop-in and helper from `deploy/slim`, reload systemd, and start
+`var-log-asus.mount`. Inside the mounted filesystem, set its root directory to
+`syslog:adm` mode 0750 and copy the old directory's contents with ownership and
+mode preserved. Do not leave live logs hidden underneath the mount.
+
+Copying changes inodes. Before restarting either reader, map its saved `inode`
+to the copied file with the same basename (`asus.log` or `asus.log.1`), preserving
+its `offset`, counters, timestamps and history. The metrics state is
+`/var/lib/asus-syslog-metrics/state.json`; the Hermes state is
+`/home/hermes/network/state/asus-logwatch.json` (confirm the service user's
+actual home first). Abort if a saved inode cannot be mapped: finish investigating
+rather than resetting counters or replaying old security events.
+
+Install the guarded logrotate file and the updated ASUS rsyslog snippet, replacing
+example addresses locally. Validate the full configuration with `sudo rsyslogd
+-N1`. Run `sudo slim-syslog-storage check` before starting rsyslog and the readers.
+The service Requires/After/BindsTo dependency starts the mount first and stops
+rsyslog if it disappears. Its ExecStartPre also rejects a wrong backing image,
+filesystem, mount options or size. Logrotate uses the same check before rotating.
+Provision the `ASUS log storage over 80%` alert; missing filesystem data also
+alerts. Confirm it against the live node-exporter metrics after migration.
+
+Check `findmnt /var/log/asus`, `sudo slim-syslog-storage check`, new log timestamps,
+metrics freshness, the watcher offsets, local system logging and service health.
+Do not flood the live listener. An isolated Linux root integration test is included:
+
+```sh
+sudo unshare --mount --net --propagation private \
+  python3 deploy/slim/tests/syslog_storage_linux.py
+```
+
+It uses its own mount/network namespaces, a 32 MiB disposable image and loopback
+listener. It checks exhaustion, bounded diagnostic output, recovery after freeing
+space, rotation, persistence across remount, refusal to overwrite an existing
+image and refusal when the mount is absent.
+
+For rollback, stop the same writers/readers, back up their current states and
+copy the mounted log contents to a new root-only staging directory. Remap saved
+inodes to the copies just as during migration. Remove the rsyslog storage drop-in,
+unmount the image, and replace the empty underlying directory with the copied
+logs (syslog:adm 0750). Restore the old rsyslog/logrotate configuration and alert
+provisioning, reload systemd, then restart the services. Preserve the image and
+backups until checked; rollback removes the hard disk budget and reopens the
+original resource-exhaustion risk. Never restore pre-migration reader offsets
+against post-migration logs.
