@@ -75,7 +75,7 @@ are supplied. Set and store web-administration credentials privately.
    on the resulting configuration. Keep all five monitoring endpoints on loopback:
    Prometheus 9090, node 9100, blackbox 9115, Pi-hole 9617 and router 9618. The blackbox
    unit drop-in grants only the capability required for its ICMP probe binary.
-6. Install Grafana provisioning and the two custom dashboards. Merge the server
+6. Install Grafana provisioning and the three custom dashboards. Merge the server
    excerpt, set a private admin password and restrict port 3000 to your trusted LAN.
    Pi-hole administration/DNS, SSH and optional xrdp need their own reviewed LAN rules.
    Do not expose metrics or administrative pages through WAN port forwarding.

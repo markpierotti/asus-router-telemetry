@@ -68,6 +68,14 @@ class CollectorStateTests(unittest.TestCase):
         self.assertEqual(set(exprs), {'router.json', 'slim-overview.json'})
         self.assertEqual(len(set(exprs.values())), 1)
 
+    def test_last_collection_is_absent_when_scrape_or_exporter_is_unhealthy(self):
+        panels = json.loads((DASH / 'router.json').read_text())['panels']
+        expression = next(p for p in panels if p['title'] == 'Last collection')['targets'][0]['expr']
+        for overrides in ({}, {'up': 0}, {'rtax_exporter_up': 0}, {'rtax_exporter_up': None}):
+            with self.subTest(overrides=overrides):
+                result = Evaluator(samples(**overrides), NOW).evaluate(expression)
+                self.assertEqual(list(result.values()), [] if overrides else [30])
+
     def test_healthy_is_ok(self):
         self.check(OK)
 

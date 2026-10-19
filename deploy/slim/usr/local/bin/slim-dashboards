@@ -81,15 +81,54 @@ rollback)
             [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "$backup/$n.json is not a readable file; nothing changed"
         fi
     done
+    # Copy every restore before changing any live file. Staged files do not end
+    # in .json, so Grafana cannot import an incomplete temporary copy.
+    staging=$(mktemp -d "$LIVE/.slim-dashboards.XXXXXX")
+    trap 'rm -rf "$staging"' EXIT
+    trap 'exit 1' HUP INT TERM
     for n in "$@"; do
         if [ -f "$backup/$n.json" ]; then
-            cp -a "$backup/$n.json" "$LIVE/$n.json"
-            echo "restored $n.json"
-        else
-            rm -f "$LIVE/$n.json"
-            echo "removed $n.json (absent from valid backup)"
+            cp -a "$backup/$n.json" "$staging/$n.new"
         fi
     done
+    python3 - "$LIVE" "$staging" "$@" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+
+live, staging = map(Path, sys.argv[1:3])
+names = list(dict.fromkeys(sys.argv[3:]))
+# Finish metadata and flush ALL staged files before the first publication.
+for name in names:
+    staged = staging / (name + '.new')
+    if not staged.exists():
+        continue
+    target = live / (name + '.json')
+    reference = target if target.is_file() else live / 'pihole.json'
+    if reference.is_file():
+        metadata = reference.stat()
+        os.chown(staged, metadata.st_uid, metadata.st_gid)
+        os.chmod(staged, stat.S_IMODE(metadata.st_mode))
+    with staged.open('rb') as stream:
+        os.fsync(stream.fileno())
+directory = os.open(live, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    # Each file changes atomically. This is not a transaction across dashboards:
+    # an I/O error during this loop can still leave earlier files published.
+    for name in names:
+        staged = staging / (name + '.new')
+        target = live / (name + '.json')
+        if staged.exists():
+            os.replace(staged, target)
+            print('restored ' + name + '.json')
+        else:
+            target.unlink(missing_ok=True)
+            print('removed ' + name + '.json (absent from valid backup)')
+        os.fsync(directory)
+finally:
+    os.close(directory)
+PY
     ;;
 *)
     die "unknown command '$cmd'"

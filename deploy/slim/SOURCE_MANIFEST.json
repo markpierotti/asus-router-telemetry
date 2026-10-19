@@ -14,6 +14,18 @@
     {
       "source": "Mac local backup pull script and launchd configuration",
       "includes": "sanitized client examples"
+    },
+    {
+      "source": "2026-10-18 authorized Slim Telegram/heartbeat deployment",
+      "includes": "secret-reading Grafana launcher, notification provisioning, heartbeat service/timer, backup coverage and tests; no live secrets"
+    },
+    {
+      "source": "2026-10-19 Slim dashboard implementation and authorized deployment",
+      "includes": "Slim overview, Pi-hole/Router restyle, root-run dashboard backup/rollback helper, deployment/state tests and desktop/narrow-width acceptance record"
+    },
+    {
+      "source": "2026-10-19 syslog storage security fix and authorized migration",
+      "includes": "fixed-budget persistent log filesystem, mount guard, rsyslog/logrotate dependencies, capacity alert, backup coverage, tests and operations procedure"
     }
   ],
   "reconstructions": [
@@ -21,7 +33,9 @@
     "Backup router service-unit paths added per later deployment command",
     "Grafana server and Pi-hole snippets are minimal examples, not full exported configs",
     "Owner-reported 21:58 DNS panel correction reflected in repository; host not accessed",
-    "Collector 1.6.2 restart unit, explicit node-exporter textfile path and filename-validated Mac pull script are source-only corrections pending deployment"
+    "Collector 1.6.2 and its restart unit were deployed on 2026-10-18; the explicit node-exporter textfile path and the filename-validated Mac pull script remain source-only corrections pending deployment",
+    "Three dashboards deployed from 9491997 and checked in Grafana 13.2.4; the ASUS address is substituted only on the host",
+    "Post-review atomic dashboard publication and the Last collection exporter-health guard are source updates pending deployment and independent review"
   ],
   "excluded": [
     "third-party community dashboard JSON (Grafana 1860 and 7587): import separately",
@@ -30,7 +44,7 @@
     "vendor firmware and compiled reporter"
   ],
   "published_file_sha256": {
-    "README.md": "93343e870396f5f82e29885ab2863407de7acfcfcd96c03758bc150e268b9f8e",
+    "README.md": "092e5cc8a63d5f315ff97d9735d4d3163b51be1895a016e072f71f625adc9431",
     "etc/default/prometheus": "903d2b1a5c3b48dabac1704e514e2becb63f56d9ccc3ddc48bd3bf67252efb26",
     "etc/default/prometheus-blackbox-exporter": "361acfd80f0db9e302edd1d0ec6d01cbd7d4d712772b77333e8eb19329d6ba5a",
     "etc/default/prometheus-node-exporter": "4afa09e75e2b554c9ff3547f263cefcd4af765cde02d85add6d8882509d6f803",
@@ -72,8 +86,9 @@
     "tests/syslog_storage_linux.py": "38a89da9e7aa22e3b6b425773338a8229bb130e5b45fbd71944bc414069fba3f",
     "tests/test_asus_syslog_metrics.py": "4629e6fb9f9deb53a785765a37048be4d6294058c521c17e679e840609422fe2",
     "tests/test_backup_pull.py": "fcfdb58f9d46fe4a8fcc3f88999a9d5f1e427f9e005e47d4caa610eaa7abd87b",
-    "tests/test_collector_state.py": "de7cbfb803ff6c529816754468be34b2083305bf80a823026a7e274652de4392",
-    "tests/test_dashboard_rollback.py": "3b14ef2b8e9436b10f349ae1166c169f1abf5d07f66dbcb9369749fb4baedd3f",
+    "tests/test_collector_state.py": "22f2df1e17adb142a5b0206b91d4f97eb6f5bb55aec26afe942ebab8533bb65f",
+    "tests/test_dashboard_publish_runbook.py": "25406677970f3d2676209ec30a3cef0861b93c59aa7b51f1e6942ca696e0dcd8",
+    "tests/test_dashboard_rollback.py": "383f01bc104a48d72b102c2cc45fadfdf08dafe0e3f70b7fba3ba70f894d57d4",
     "tests/test_dashboards.py": "4a3ea8175156918dce0032cfb5277b07c6233f526a4ff198ba9992eab5dd77e8",
     "tests/test_exporters.py": "b6e3d9bd6f51ee24d648e4c0ba330498b598291b2ad4828b2ee89d71e8a24eb3",
     "tests/test_heartbeat.py": "bffe1221991594ff05803c96e897c6af670984e6eeddb01429eb279c09ff2881",
@@ -87,11 +102,12 @@
     "usr/local/bin/rtax-exporter": "f5c249672fa0d8992c3e6fa1d77b7eb939acef854aa88de85022ec5e52f777c1",
     "usr/local/bin/slim-backup": "63fbf3e02ed7dba02e0ccf140ef2be2589cb0e747052937d58be8b012a9949e9",
     "usr/local/bin/slim-backup-serve": "bc9f0d6fa5c7a45542b96c484aab5bf2798a5e78930c1a27c03b6a42e591938b",
-    "usr/local/bin/slim-dashboards": "fb05d3be0585f7df2725a4dd24f12e1023e2d1893cbf5aee0075de6f0863914c",
+    "usr/local/bin/slim-dashboards": "639d1ea587d45528dab8c9fe7e253f84633ff340adfcedcbecb220764745ece1",
     "usr/local/bin/slim-heartbeat": "b417bbdcf7f4f18d6753c53764634c5d3e76995ea72437c1f53d1f7824f0c3a6",
     "usr/local/bin/slim-syslog-storage": "c2ae498d6f1a52a4e989db68db0ec1c0cf16568b713bd6a13eac910a97be0b24",
     "var/lib/grafana/dashboards/pihole.json": "e1e88e722e40b44d7893fed4342710d9e143056eefb05cd0d109cc786ba5d254",
-    "var/lib/grafana/dashboards/router.json": "9e0608fc926075d01f0b372223d01049ebf28951399bb3ebf50e7122f84f333b",
+    "var/lib/grafana/dashboards/router.json": "eb7f750934f41cc0687af23456df25e8c276f1b13b2101fed76306d0de1148b0",
     "var/lib/grafana/dashboards/slim-overview.json": "a42a363449f6136bc691b0761e76e27465cad9b68f53c778678ff260bd66d9be"
-  }
+  },
+  "updated": "2026-10-19"
 }

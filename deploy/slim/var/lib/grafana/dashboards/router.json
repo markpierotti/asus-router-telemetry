@@ -146,7 +146,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(time() - rtax_last_attempt_timestamp_seconds) and on() (up{job=\"router\"} == 1)",
+          "expr": "(time() - rtax_last_attempt_timestamp_seconds) and on() (up{job=\"router\"} == 1) and on() (rtax_exporter_up == 1)",
           "instant": true,
           "range": false
         }

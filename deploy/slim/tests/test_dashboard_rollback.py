@@ -215,6 +215,43 @@ class RollbackTests(unittest.TestCase):
         self.assertIn('backup copy failed', result.stderr)
         self.assertEqual(list(self.tmp.glob('grafana-dashboards-*')), [])
 
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_restore_publishes_a_new_inode_and_preserves_live_permissions(self):
+        target = self.live / 'pihole.json'
+        os.chown(target, NOBODY, NOBODY)
+        target.chmod(0o640)
+        before = target.stat()
+        with target.open('rb') as old_reader:
+            result = self.run_script('rollback', self.backup, 'pihole')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(old_reader.read(), b'pihole-NEW')
+        after = target.stat()
+        self.assertNotEqual(before.st_ino, after.st_ino)
+        self.assertEqual((after.st_uid, after.st_gid, after.st_mode & 0o777),
+                         (before.st_uid, before.st_gid, 0o640))
+        self.assertEqual(target.read_text(), 'pihole-OLD')
+        self.assertEqual(list(self.live.glob('.slim-dashboards.*')), [])
+
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_restore_stage_copy_failure_leaves_all_live_files_unchanged(self):
+        bindir = self.tmp / 'bin'
+        bindir.mkdir()
+        real_cp = shutil.which('cp')
+        (bindir / 'cp').write_text('#!/bin/sh\ncase "$2" in */backup/router.json) exit 1;; esac\nexec "' + real_cp + '" "$@"\n')
+        (bindir / 'cp').chmod(0o755)
+        from unittest.mock import patch
+        with patch.dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH']):
+            result = self.run_script('rollback', self.backup, 'pihole', 'router', 'slim-overview')
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_live_untouched()
+        self.assertEqual(list(self.live.glob('.slim-dashboards.*')), [])
+
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_duplicate_restore_names_do_not_delete_the_restored_file(self):
+        result = self.run_script('rollback', self.backup, 'pihole', 'pihole')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.live_text('pihole'), 'pihole-OLD')
+
 
 if __name__ == '__main__':
     unittest.main()

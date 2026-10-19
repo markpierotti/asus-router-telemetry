@@ -24,6 +24,23 @@ session and are superseded by this acceptance record.
   their reviewed source.
 
 
+## Post-review source updates — not yet deployed
+
+The manifest again retains the Telegram/heartbeat provenance and collector 1.6.2
+commissioning note. Dashboard rollback stages and fsyncs replacements before
+publishing each file by rename, preserving live permissions. The deploy snippets
+use the same stage/flush/rename pattern. A staging failure leaves all dashboards
+unchanged; a later publication failure can still leave a sequential rollback
+partially completed. The Router Last collection tile now also requires exporter
+health. These source changes await independent review and deployment.
+
+The root disk tile was subsequently compared with the host's df calculation:
+55.5629% from Prometheus versus 55.5631% on the host, with df displaying 56% after
+rounding up. Browser Inspect > Query errors were not separately audited, and no
+whole-host restore or power-loss exercise is claimed.
+
+## Implementation
+
 Branch `add-slim-overview-dashboard`. Adds the **Slim overview** dashboard and
 restyles the existing Pi-hole and Router dashboards. Dashboard UIDs, titles, panel
 ids and layout are unchanged. No alert rule, notification route, collector, DNS or
@@ -67,7 +84,7 @@ network configuration changed.
   sample show gaps when that sample is stale.
 - All three dashboards gain a "Home lab" dashboard-links dropdown.
 
-## Verified
+## Historical implementation checks — before deployment
 
 Through a signed-in Grafana (version 13.2.4) and its query API, read-only:
 
@@ -89,7 +106,7 @@ Through a signed-in Grafana (version 13.2.4) and its query API, read-only:
   failure, stale and failed attempts, open incidents, recovery and state precedence.
   The state tests fail on the previous expression, which let missing metrics read OK.
 
-## Rollback helper
+### Historical rollback-helper check
 
 `usr/local/bin/slim-dashboards` runs backup and rollback entirely as root, because the
 backup directory is root-owned 0750 and an unprivileged existence check cannot tell
@@ -100,7 +117,7 @@ an abort with the live dashboards untouched; they also cover the root-side behav
 invalid backup or an unknown name). With a naive version of the script those tests
 fail. Not covered: a real `sudo` password prompt or sudoers policy, and any run on Slim.
 
-## Not verified
+### Historical limitations — superseded by deployment acceptance
 
 - **Deployment to Slim and visual rendering.** The session could not write to Slim
   or open the new dashboards in Grafana, so layout, legends, colours and narrow-width

@@ -61,6 +61,43 @@ every check and copy as root. Never test the backup directory yourself without `
 D=deploy/slim/var/lib/grafana/dashboards
 SD="sh deploy/slim/usr/local/bin/slim-dashboards"
 LIVE=/var/lib/grafana/dashboards
+
+# Run after backup, while the existing Pi-hole file provides trusted permissions.
+publish_dashboard() {
+  sudo python3 - "$1" "$LIVE/$2.json" "$LIVE/pihole.json" "${3:-}" <<'PY'
+import ipaddress
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+source, target, reference = map(Path, sys.argv[1:4])
+data = source.read_bytes()
+if sys.argv[4]:
+    address = str(ipaddress.IPv4Address(sys.argv[4]))
+    data = data.replace(b'192.0.2.20', address.encode('ascii'))
+json.loads(data)  # Refuse invalid JSON before touching the live directory.
+metadata = reference.stat()
+fd, temporary = tempfile.mkstemp(prefix='.dashboard-', dir=target.parent)
+try:
+    with os.fdopen(fd, 'wb') as stream:
+        os.fchown(stream.fileno(), metadata.st_uid, metadata.st_gid)
+        os.fchmod(stream.fileno(), stat.S_IMODE(metadata.st_mode))
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, target)
+    directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    Path(temporary).unlink(missing_ok=True)
+PY
+}
 ```
 
 ### Backup (both procedures)
@@ -79,9 +116,7 @@ sudo ls -l "$BACKUP"
 `slim-overview.json` needs no address edits. The other two dashboards are not touched.
 
 ```sh
-sudo cp "$D/slim-overview.json" $LIVE/slim-overview.json
-sudo chown --reference=$LIVE/pihole.json $LIVE/slim-overview.json
-sudo chmod --reference=$LIVE/pihole.json $LIVE/slim-overview.json
+publish_dashboard "$D/slim-overview.json" slim-overview
 ```
 
 ### B. All three (overview, Pi-hole, Router)
@@ -91,12 +126,9 @@ point. Substitute the real one on Slim; never commit the real address.
 
 ```sh
 AP_IP=192.0.2.20   # replace with the real access-point address
-sudo cp "$D/slim-overview.json" "$D/pihole.json" $LIVE/
-sed "s/192\.0\.2\.20/$AP_IP/g" "$D/router.json" | sudo tee $LIVE/router.json >/dev/null
-for f in slim-overview pihole router; do
-  sudo chown --reference="$LIVE/pihole.json" $LIVE/$f.json
-  sudo chmod --reference="$LIVE/pihole.json" $LIVE/$f.json
-done
+publish_dashboard "$D/slim-overview.json" slim-overview
+publish_dashboard "$D/pihole.json" pihole
+publish_dashboard "$D/router.json" router "$AP_IP"
 ```
 
 ### Check
@@ -131,6 +163,14 @@ directory, unreadable, or not a valid backup (it must hold readable `pihole.json
 each named dashboard that is in the backup. It deletes `slim-overview.json` only after
 confirming, as root, that a valid backup does not contain it, so the overview is removed
 only if it did not exist before and an earlier copy is put back if there was one.
+Restores stage and fsync every replacement before publishing any of them, preserve
+existing live ownership/mode (or use Pi-hole as the reference for a missing file),
+and replace each file by rename within the live filesystem. Grafana therefore sees
+complete files, never an in-place partial write. Temporary files do not end in
+`.json`. A staging failure leaves all live files unchanged. Publication across
+multiple dashboards is sequential: a later rename, deletion or directory-fsync
+failure can leave earlier files changed. Inspect the error and live files before
+retrying; this procedure is not a multi-file transaction.
 Pi-hole and Router always existed, so they are restored, and a backup missing one of
 them aborts rather than deleting it. Grafana removes a provisioned dashboard whose file
 is deleted unless `disableDeletion` is set on the provider.
