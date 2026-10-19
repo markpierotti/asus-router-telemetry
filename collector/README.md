@@ -60,7 +60,7 @@ ssh-keygen -t ed25519 -N '' -C rtax-collector -f /absolute/path/to/private/id_ed
 python3 collector.py collect --once --identity-file /absolute/path/to/private/id_ed25519 --data-dir /absolute/path/to/private/data
 ```
 
-A key without a passphrase is a credential at rest: keep it `0600`, owned by a dedicated unprivileged account, and give the router account no more than collection needs. Key mode was offline-tested and deployed on Slim on 2026-10-17; see the [deployment record](../docs/slim-deployment-20261017.md) and [systemd example](../deploy/slim/etc/systemd/system/rtax-collector.service). That observation is separate from the 1.5.5 hardware acceptance below.
+A key without a passphrase is a credential at rest: keep it `0600`, owned by a dedicated unprivileged account, and give the router account no more than collection needs. Key mode was offline-tested and deployed on Slim on 2026-10-17; see the [deployment record](../docs/slim-deployment-20261017.md) and [systemd example](examples/rtax-collector.service). That observation is separate from the 1.5.5 hardware acceptance below.
 
 ## Interpretation
 

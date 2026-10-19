@@ -16,19 +16,15 @@ human contribution, assisted implementation and independent verification.
 
 ## Part of a larger home lab
 
-The collector now runs every minute on Slim, a wired Ubuntu thin client, alongside
-Pi-hole, Prometheus and Grafana. Custom exporters connect DNS and router telemetry
-to dashboards and 16 alert rules delivered to Telegram, with an external
-healthchecks.io heartbeat; private backups are created on Slim and pulled to a Mac.
-Pi-hole resolves through a local Unbound, the ASUS access point's syslog is kept on
-Slim, and a read-only Hermes agent adds alert follow-ups and a daily digest.
+The collector runs on Slim alongside Pi-hole, Prometheus and Grafana. The broader
+DNS, dashboards, alerting, backups and Hermes deployment are maintained in
+[home-lab](https://github.com/markpierotti/home-lab), which consumes an immutable
+collector revision. Reporter and collector development, router trials and the
+[collector service contract](collector/examples/rtax-collector.service) stay here.
 
-The [17 October deployment record](docs/slim-deployment-20261017.md) separates
-commissioning results and operator-supplied live checks from work still awaiting
-validation. [Deployment examples](deploy/slim/README.md) and an
-[operations runbook](docs/slim-operations.md) make the setup inspectable.
-The [home-lab roadmap](docs/home-lab-roadmap.md) covers the next stages, including
-Hermes, Project Limbo, segmentation and detection exercises.
+See the home-lab [operations runbook](https://github.com/markpierotti/home-lab/blob/main/docs/slim-operations.md)
+and [roadmap](https://github.com/markpierotti/home-lab/blob/main/docs/home-lab-roadmap.md).
+Historical deployment links in this repository redirect to that source.
 
 ## Measured results
 
