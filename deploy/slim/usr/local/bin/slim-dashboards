@@ -125,7 +125,12 @@ for name in names:
             raise ValueError('stage is not a regular file: ' + name)
         target = live / (name + '.json')
         reference = target if target.exists() or target.is_symlink() else live / 'pihole.json'
-        metadata = reference.lstat()
+        try:
+            metadata = reference.lstat()
+        except FileNotFoundError:
+            # Recovery must also work when Pi-hole (our usual reference) is gone.
+            # cp -a retained the validated backup's metadata on this regular fd.
+            metadata = os.fstat(fd)
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError('live reference is not a regular file: ' + name)
         os.fchown(fd, metadata.st_uid, metadata.st_gid)

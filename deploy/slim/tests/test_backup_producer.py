@@ -19,7 +19,10 @@ class BackupProducerTests(unittest.TestCase):
         self.prom = self.root / 'metrics'
         self.bin = self.root / 'bin'
         self.bin.mkdir()
-        source = SCRIPT.read_text().replace('DEST=/var/backups/slim', 'DEST="' + str(self.dest) + '"').replace(
+        original = SCRIPT.read_text()
+        self.assertEqual(original.count('DEST=/var/backups/slim'), 1)
+        self.assertEqual(original.count('PROM=/var/lib/prometheus/node-exporter/slim_backup.prom'), 1)
+        source = original.replace('DEST=/var/backups/slim', 'DEST="' + str(self.dest) + '"').replace(
             'PROM=/var/lib/prometheus/node-exporter/slim_backup.prom', 'PROM="' + str(self.prom) + '"')
         self.script = self.root / 'script'
         self.script.write_text(source)

@@ -88,7 +88,7 @@ class Evaluator:
             self.take()
             self.take('on'); self.take('('); self.take(')')
             right = self.parse_cmp()
-            left = left if (self.need_vec(right) and right) else Series()
+            left = Series(left) if (self.need_vec(right) and right) else Series()
             self.need_vec(left)
         return left
 
@@ -160,13 +160,16 @@ class Evaluator:
                 if self.peek()[1] == ',':
                     self.take()
             self.take('}')
-        inferred, seen = {}, set()
+        inferred, used = {}, set()
         for label, op, value in matchers:
-            if label in seen:
+            if label in used:
                 inferred.pop(label, None)
             elif label != '__name__' and op == '=':
-                inferred[label] = value
-            seen.add(label)
+                # Prometheus records equality matchers only. A second matcher
+                # for a previously set label removes its inferred value.
+                if value:
+                    inferred[label] = value
+                used.add(label)
         out = Series(absent_labels=inferred.items())
         for labels, value in self.samples.get(name, []):
             if all(self.match(labels.get(l, ''), op, v) for l, op, v in matchers):

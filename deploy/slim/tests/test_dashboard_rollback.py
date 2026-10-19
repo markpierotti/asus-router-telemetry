@@ -308,5 +308,22 @@ class RollbackTests(unittest.TestCase):
             self.assertEqual((self.tmp / 'sentinel').read_text(), 'outside')
 
 
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_restore_all_missing_live_files_uses_backup_metadata(self):
+        self.write(self.backup / 'slim-overview.json', 'overview-OLD')
+        for name in ('pihole', 'router', 'slim-overview'):
+            (self.live / (name + '.json')).unlink()
+            (self.backup / (name + '.json')).chmod(0o640)
+        result = self.run_script('rollback', self.backup, 'pihole', 'router', 'slim-overview')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ('pihole', 'router', 'slim-overview'):
+            target = self.live / (name + '.json')
+            source = self.backup / (name + '.json')
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            actual, expected = target.stat(), source.stat()
+            self.assertEqual((actual.st_uid, actual.st_gid, actual.st_mode & 0o777),
+                             (expected.st_uid, expected.st_gid, 0o640))
+
+
 if __name__ == '__main__':
     unittest.main()
