@@ -176,6 +176,38 @@ class RollbackTests(unittest.TestCase):
         for name in ('pihole', 'router', 'slim-overview'):
             self.assertEqual((dest / f'{name}.json').read_text(), self.live_text(name))
 
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_same_timestamp_backups_are_distinct_snapshots(self):
+        bindir = self.tmp / 'bin'
+        bindir.mkdir()
+        (bindir / 'date').write_text('#!/bin/sh\necho 20261019-120000\n')
+        (bindir / 'date').chmod(0o755)
+        from unittest.mock import patch
+        with patch.dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH']):
+            first = self.run_script('backup')
+            self.assertEqual(first.returncode, 0, first.stderr)
+            (self.live / 'slim-overview.json').unlink()
+            second = self.run_script('backup')
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertNotEqual(first.stdout.strip(), second.stdout.strip())
+        self.assertTrue((Path(first.stdout.strip()) / 'slim-overview.json').exists())
+        self.assertFalse((Path(second.stdout.strip()) / 'slim-overview.json').exists())
+
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_optional_dashboard_copy_failure_does_not_report_success(self):
+        bindir = self.tmp / 'bin'
+        bindir.mkdir()
+        # Force a failure only for the optional overview, after required files copy.
+        real_cp = shutil.which('cp')
+        (bindir / 'cp').write_text('#!/bin/sh\ncase "$2" in */slim-overview.json) exit 1;; esac\nexec "' + real_cp + '" "$@"\n')
+        (bindir / 'cp').chmod(0o755)
+        from unittest.mock import patch
+        with patch.dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH']):
+            result = self.run_script('backup')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('backup copy failed', result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

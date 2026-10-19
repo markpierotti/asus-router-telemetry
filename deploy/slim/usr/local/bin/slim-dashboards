@@ -43,11 +43,15 @@ case "$cmd" in
 backup)
     [ -d "$LIVE" ] || die "dashboard directory $LIVE not found"
     for n in $REQUIRED; do [ -f "$LIVE/$n.json" ] || die "$LIVE/$n.json missing; refusing to make an incomplete backup"; done
-    dest="$BACKUP_ROOT/grafana-dashboards-$(date +%Y%m%d-%H%M%S)"
-    install -d -m 0750 "$dest"
+    dest=$(mktemp -d "$BACKUP_ROOT/grafana-dashboards-$(date +%Y%m%d-%H%M%S).XXXXXX")
     # Copy entries one by one: `cp -a dir/. dest/` would also copy the live
     # directory's mode and owner onto the private backup directory.
-    find "$LIVE" -mindepth 1 -maxdepth 1 -exec cp -a {} "$dest"/ \;
+    # A failed find -exec with a semicolon does not make find itself fail. Copy
+    # in the shell so failure of ANY entry (including the overview) aborts.
+    for entry in "$LIVE"/* "$LIVE"/.[!.]* "$LIVE"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        cp -a "$entry" "$dest"/ || die "backup copy failed; incomplete directory: $dest"
+    done
     chown root:root "$dest"
     chmod 0750 "$dest"
     for n in $REQUIRED; do [ -f "$dest/$n.json" ] || die "backup verification failed for $n.json"; done
