@@ -7,6 +7,9 @@
     compress
     delaycompress
     sharedscripts
+    firstaction
+        /usr/local/bin/slim-syslog-storage check || exit 1
+    endscript
     postrotate
         /usr/lib/rsyslog/rsyslog-rotate
     endscript
