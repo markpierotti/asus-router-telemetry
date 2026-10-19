@@ -37,6 +37,10 @@ jobs:
       - name: Build and test offline
         run: make test
 
+      - name: Privileged deployment fixtures on disposable Linux runner
+        if: runner.os == 'Linux'
+        run: sudo env PYTHONDONTWRITEBYTECODE=1 "$(command -v python3)" -m unittest discover -s deploy/slim/tests -p 'test_*.py' -v
+
 # Jobs contain no device credentials and run suites serially within each runner.
 # The first hosted run must pass before this workflow is described as validated CI.
 

@@ -4,13 +4,21 @@
 # units/scripts, collector config. Prometheus metric history is NOT included.
 # Output: /var/backups/slim/slim-YYYYmmdd-HHMMSS.tar.gz (root:slim 0640), keeps 14.
 set -euo pipefail
+umask 077
 DEST=/var/backups/slim
 KEEP=14
 PROM=/var/lib/prometheus/node-exporter/slim_backup.prom
 stamp=$(date +%Y%m%d-%H%M%S)
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/pihole" "$work/grafana" "$DEST"
+part=
+trap 'rm -rf "$work"; [ -z "$part" ] || rm -f -- "$part"' EXIT
+mkdir -p "$work/pihole" "$work/grafana"
+if [ -L "$DEST" ] || { [ -e "$DEST" ] && [ ! -d "$DEST" ]; }; then
+  echo "backup destination must be a real directory" >&2; exit 1
+fi
+mkdir -p "$DEST"
+chown root:slim "$DEST"
+chmod 750 "$DEST"
 
 snap() {  # consistent copy of a live SQLite DB
   python3 -I -c 'import sqlite3,sys
@@ -49,9 +57,11 @@ tar -C / --ignore-failed-read -czf "$work/files.tar.gz" \
   home/rtax/pinned home/rtax/data home/slim/.ssh/authorized_keys 2>/dev/null || true
 
 out="$DEST/slim-$stamp.tar.gz"
-tar -C "$work" -czf "$out.part" pihole grafana files.tar.gz dpkg-selections.txt versions.txt
-chown root:slim "$out.part"; chmod 640 "$out.part"
-mv "$out.part" "$out"
+part=$(mktemp "$DEST/.slim-$stamp.part.XXXXXX")
+tar -C "$work" -czf "$part" pihole grafana files.tar.gz dpkg-selections.txt versions.txt
+chown root:slim "$part"; chmod 640 "$part"
+mv "$part" "$out"
+part=
 ls -1t "$DEST"/slim-*.tar.gz | tail -n +$((KEEP + 1)) | xargs -r rm -f
 
 size=$(stat -c %s "$out")

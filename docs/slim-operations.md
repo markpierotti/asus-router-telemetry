@@ -42,6 +42,144 @@ the pending-cleanup ledger. Follow the existing [cleanup procedure](dropout-reco
 for exact recorded owned paths; do not delete arbitrary router temporary directories.
 After resolving the cause, explicitly restart the service and confirm new samples.
 
+## Deploying or rolling back a dashboard
+
+The dashboards in `deploy/slim/var/lib/grafana/dashboards/` are loaded by the
+`Home lab` file provider. Edits made in the Grafana UI to a provisioned dashboard
+do not persist, and importing one with the same UID through the UI conflicts with
+it, so deploy by file. Run these on Slim, from a checkout of this repository that
+holds the new files. Deploy the overview first and look at it in Grafana before
+deploying the other two.
+
+Backups are root-owned and mode 0750, so an ordinary operator cannot even test
+whether a file exists in one: an unprivileged `[ -e ... ]` answers "absent" for a file
+that is there. Backup and rollback therefore go through
+`deploy/slim/usr/local/bin/slim-dashboards`, which escalates with `sudo` first and does
+every check and copy as root. Backups must contain regular dashboard files;
+symlinks and special entries are rejected. Restore/delete decisions use the backup,
+never a missing staging file. Never test the backup directory yourself without `sudo`.
+
+```sh
+D=deploy/slim/var/lib/grafana/dashboards
+SD="sh deploy/slim/usr/local/bin/slim-dashboards"
+LIVE=/var/lib/grafana/dashboards
+
+# Run after backup, while the existing Pi-hole file provides trusted permissions.
+publish_dashboard() {
+  sudo python3 - "$1" "$LIVE/$2.json" "$LIVE/pihole.json" "${3:-}" <<'PY'
+import ipaddress
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+source, target, reference = map(Path, sys.argv[1:4])
+data = source.read_bytes()
+if sys.argv[4]:
+    address = str(ipaddress.IPv4Address(sys.argv[4]))
+    data = data.replace(b'192.0.2.20', address.encode('ascii'))
+json.loads(data)  # Refuse invalid JSON before touching the live directory.
+metadata = reference.stat()
+fd, temporary = tempfile.mkstemp(prefix='.dashboard-', dir=target.parent)
+try:
+    with os.fdopen(fd, 'wb') as stream:
+        os.fchown(stream.fileno(), metadata.st_uid, metadata.st_gid)
+        os.fchmod(stream.fileno(), stat.S_IMODE(metadata.st_mode))
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, target)
+    directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    Path(temporary).unlink(missing_ok=True)
+PY
+}
+```
+
+### Backup (both procedures)
+
+The script refuses to back up unless `pihole.json` and `router.json` are present, and
+verifies the copy. Keep the printed path: rollback needs it.
+
+```sh
+BACKUP=$($SD backup)
+echo "$BACKUP"
+sudo ls -l "$BACKUP"
+```
+
+### A. Overview only
+
+`slim-overview.json` needs no address edits. The other two dashboards are not touched.
+
+```sh
+publish_dashboard "$D/slim-overview.json" slim-overview
+```
+
+### B. All three (overview, Pi-hole, Router)
+
+`router.json` in the repository shows the example address `192.0.2.20` for the access
+point. Substitute the real one on Slim; never commit the real address.
+
+```sh
+AP_IP=192.0.2.20   # replace with the real access-point address
+publish_dashboard "$D/slim-overview.json" slim-overview
+publish_dashboard "$D/pihole.json" pihole
+publish_dashboard "$D/router.json" router "$AP_IP"
+```
+
+### Check
+
+Grafana re-reads the folder at the provider's update interval (10 seconds unless
+`updateIntervalSeconds` is set).
+
+```sh
+ls -l $LIVE
+curl --fail --silent http://127.0.0.1:3000/api/health
+```
+
+Sign in and open each dashboard; use a panel's Inspect > Query view to read any query
+error, because a tile that says NO DATA is reporting missing data, not necessarily a
+broken query.
+
+### Rollback
+
+Name the dashboards you deployed: `slim-overview` for procedure A, all three for
+procedure B. Use the `BACKUP` path printed above, or `sudo ls -d /var/backups/grafana-dashboards-*`
+to find it.
+
+```sh
+$SD rollback "$BACKUP" slim-overview                    # after procedure A
+$SD rollback "$BACKUP" slim-overview pihole router      # after procedure B
+```
+
+The script does everything as root and changes nothing unless the checks pass. It
+aborts, leaving the live directory as it was, if the backup is missing, not a
+directory, unreadable, or not a valid backup (it must hold readable `pihole.json` and
+`router.json`, which existed before this change), or if a name is unknown. It restores
+each named dashboard that is in the backup. It deletes `slim-overview.json` only after
+confirming, as root, that a valid backup does not contain it, so the overview is removed
+only if it did not exist before and an earlier copy is put back if there was one.
+Restores stage and fsync every replacement before publishing any of them, preserve
+existing live ownership/mode (or use Pi-hole as the reference for a missing file),
+and replace each file by rename within the live filesystem. Grafana therefore sees
+complete files, never an in-place partial write. Temporary files do not end in
+`.json`. A staging failure leaves all live files unchanged. Publication across
+multiple dashboards is sequential: a later rename, deletion or directory-fsync
+failure can leave earlier files changed. Inspect the error and live files before
+retrying; this procedure is not a multi-file transaction.
+Pi-hole and Router always existed, so they are restored, and a backup missing one of
+them aborts rather than deleting it. Grafana removes a provisioned dashboard whose file
+is deleted unless `disableDeletion` is set on the provider.
+
+What was and was not checked for the current dashboard set is recorded in
+[slim-dashboards-20261019.md](slim-dashboards-20261019.md).
+
 ## Backups and Mac pulls
 
 ```sh
@@ -110,7 +248,16 @@ Remote ASUS logs must live on the separate 256 MiB ext4 image mounted at
 it cannot enforce a disk budget between runs. The preallocated image includes
 current logs, rotated logs and filesystem metadata in one budget. When it fills,
 UDP logs can be lost until space is freed, while the remaining root disk stays
-available. The original allowlist and file permissions still apply. Internal
+available. This is containment, not automatic recovery: the current 30-file,
+50 MiB rotation policy does not fit its worst-case retained volume inside this
+image. Compression can also need space that is unavailable after exhaustion.
+Do not rely on daily rotation to recover a full filesystem. The 80% alert requires
+operator action: identify and stop the noisy source, preserve needed evidence to
+a separate private destination, then remove expendable rotated logs and verify
+new messages arrive. If only the current file consumes the budget, coordinate
+rotation and reader-state handling before discarding data; do not reset offsets
+or silently truncate forensic evidence. Automatic evidence eviction is not part
+of this deployment's contract. The original allowlist and file permissions still apply. Internal
 rsyslog errors are rate limited and stderr has a per-process cap; see the
 [rsyslog global options](https://docs.rsyslog.com/doc/rainerscript/global.html).
 

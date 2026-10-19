@@ -1,0 +1,162 @@
+#!/bin/sh
+# Back up and roll back the provisioned Grafana dashboards on Slim.
+#
+#   slim-dashboards backup
+#   slim-dashboards rollback BACKUP_DIR NAME...     (NAME: slim-overview, pihole, router)
+#
+# Every step runs as root. The backup directory is root-owned and 0750, so an
+# unprivileged "does this file exist?" test cannot tell "absent" from "permission
+# denied". This script therefore escalates first and refuses to continue unless it
+# can read the backup. It deletes a dashboard only after establishing, as root, that
+# the backup is valid (a readable directory holding pihole.json and router.json,
+# which always exist) and does not contain that dashboard. Anything doubtful aborts
+# before the live directory is touched.
+#
+# SLIM_DASHBOARD_DIR, SLIM_BACKUP_ROOT and SLIM_SUDO exist for tests; leave them unset.
+set -eu
+
+LIVE=${SLIM_DASHBOARD_DIR:-/var/lib/grafana/dashboards}
+BACKUP_ROOT=${SLIM_BACKUP_ROOT:-/var/backups}
+SUDO=${SLIM_SUDO:-sudo}
+REQUIRED="pihole router"          # present before this change, so always in a valid backup
+KNOWN="slim-overview pihole router"
+
+die() { echo "slim-dashboards: $*" >&2; exit 1; }
+
+if [ "${1:-}" = "--elevated" ]; then
+    shift
+elif [ "$(id -u)" -ne 0 ]; then
+    self=$(readlink -f "$0")
+    exec $SUDO sh "$self" --elevated "$@"
+fi
+[ "$(id -u)" -eq 0 ] || die "must run as root; could not elevate"
+umask 027
+
+known() { for k in $KNOWN; do [ "$k" = "$1" ] && return 0; done; return 1; }
+required() { for k in $REQUIRED; do [ "$k" = "$1" ] && return 0; done; return 1; }
+
+cmd=${1:-}
+[ -n "$cmd" ] || die "usage: slim-dashboards backup | rollback BACKUP_DIR NAME..."
+shift
+
+case "$cmd" in
+backup)
+    [ -d "$LIVE" ] && [ ! -L "$LIVE" ] || die "dashboard directory must be a real directory"
+    # Snapshots contain ordinary files/directories only; cp -a must never retain
+    # links or device/FIFO entries that acquire a different meaning on restore.
+    unsafe=$(find "$LIVE" ! -type d ! -type f -print -quit)
+    [ -z "$unsafe" ] || die "backup refuses non-regular entry: $unsafe"
+    for n in $REQUIRED; do [ -f "$LIVE/$n.json" ] || die "$LIVE/$n.json missing; refusing to make an incomplete backup"; done
+    dest=$(mktemp -d "$BACKUP_ROOT/grafana-dashboards-$(date +%Y%m%d-%H%M%S).XXXXXX")
+    # Copy entries one by one: `cp -a dir/. dest/` would also copy the live
+    # directory's mode and owner onto the private backup directory.
+    # A failed find -exec with a semicolon does not make find itself fail. Copy
+    # in the shell so failure of ANY entry (including the overview) aborts.
+    for entry in "$LIVE"/* "$LIVE"/.[!.]* "$LIVE"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        if ! cp -a "$entry" "$dest"/; then
+            # Never leave a required-files-only partial copy that rollback could
+            # mistake for a complete backup with an intentionally absent overview.
+            rm -rf "$dest"
+            die "backup copy failed; incomplete backup removed"
+        fi
+    done
+    chown root:root "$dest"
+    chmod 0750 "$dest"
+    for n in $REQUIRED; do [ -f "$dest/$n.json" ] || die "backup verification failed for $n.json"; done
+    echo "$dest"
+    ;;
+rollback)
+    backup=${1:-}; [ -n "$backup" ] || die "rollback needs BACKUP_DIR"
+    shift
+    [ "$#" -gt 0 ] || die "rollback needs at least one dashboard name"
+    [ -d "$backup" ] && [ ! -L "$backup" ] || die "backup $backup is missing or not a directory; nothing changed"
+    [ -r "$backup" ] && [ -x "$backup" ] || die "backup $backup is not readable; nothing changed"
+    [ -d "$LIVE" ] && [ ! -L "$LIVE" ] || die "dashboard directory must be a real directory"
+    for n in $REQUIRED; do
+        [ ! -L "$backup/$n.json" ] && [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "backup $backup is not a valid backup ($n.json missing or unreadable); nothing changed"
+    done
+    # Preflight every name before changing anything.
+    for n in "$@"; do
+        known "$n" || die "unknown dashboard '$n' (expected one of: $KNOWN); nothing changed"
+        if [ ! -e "$backup/$n.json" ] && [ ! -L "$backup/$n.json" ]; then
+            required "$n" && die "$n.json should be in the backup but is not; nothing changed"
+        else
+            [ ! -L "$backup/$n.json" ] && [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "$backup/$n.json is not a readable file; nothing changed"
+        fi
+    done
+    # Copy every restore before changing any live file. Staged files do not end
+    # in .json, so Grafana cannot import an incomplete temporary copy.
+    staging=$(mktemp -d "$LIVE/.slim-dashboards.XXXXXX")
+    trap 'rm -rf "$staging"' EXIT
+    trap 'exit 1' HUP INT TERM
+    for n in "$@"; do
+        if [ -f "$backup/$n.json" ]; then
+            cp -a "$backup/$n.json" "$staging/$n.new"
+        fi
+    done
+    python3 - "$LIVE" "$staging" "$backup" "$@" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+
+live, staging, backup = map(Path, sys.argv[1:4])
+names = list(dict.fromkeys(sys.argv[4:]))
+# The restore/delete decision comes from the validated backup, never from a
+# possibly missing or dangling staging entry. Validate every stage before publish.
+restores = {}
+for name in names:
+    source = backup / (name + '.json')
+    try:
+        source_mode = source.lstat().st_mode
+    except FileNotFoundError:
+        if name != 'slim-overview':
+            raise ValueError('required backup disappeared: ' + name)
+        restores[name] = False
+        continue
+    if not stat.S_ISREG(source_mode):
+        raise ValueError('backup is not a regular file: ' + name)
+    restores[name] = True
+    staged = staging / (name + '.new')
+    fd = os.open(staged, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError('stage is not a regular file: ' + name)
+        target = live / (name + '.json')
+        reference = target if target.exists() or target.is_symlink() else live / 'pihole.json'
+        try:
+            metadata = reference.lstat()
+        except FileNotFoundError:
+            # Recovery must also work when Pi-hole (our usual reference) is gone.
+            # cp -a retained the validated backup's metadata on this regular fd.
+            metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError('live reference is not a regular file: ' + name)
+        os.fchown(fd, metadata.st_uid, metadata.st_gid)
+        os.fchmod(fd, stat.S_IMODE(metadata.st_mode))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+directory = os.open(live, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    # Each file changes atomically. This is not a transaction across dashboards:
+    # an I/O error during this loop can still leave earlier files published.
+    for name in names:
+        staged = staging / (name + '.new')
+        target = live / (name + '.json')
+        if restores[name]:
+            os.replace(staged, target)
+            print('restored ' + name + '.json')
+        else:
+            target.unlink(missing_ok=True)
+            print('removed ' + name + '.json (absent from valid backup)')
+        os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    ;;
+*)
+    die "unknown command '$cmd'"
+    ;;
+esac

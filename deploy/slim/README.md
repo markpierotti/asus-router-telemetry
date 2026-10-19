@@ -36,8 +36,9 @@ are supplied. Set and store web-administration credentials privately.
 | `usr/local/bin/rtax-exporter` | Read-only collector state and history metrics, loopback port 9618 |
 | `etc/prometheus/` and `etc/default/` | Scrapes, probes and loopback listeners; 30-day / 2 GB retention |
 | `etc/grafana/provisioning/` | Datasource, dashboard provider, Telegram/Hermes notifications and 16 alert rules |
-| `var/lib/grafana/dashboards/` | Custom Pi-hole and ASUS dashboards |
+| `var/lib/grafana/dashboards/` | Custom Slim overview, Pi-hole and ASUS dashboards (deploy and rollback: [operations runbook](../../docs/slim-operations.md)) |
 | `etc/systemd/system/` | Collector/exporter units, backup timer and ICMP capability setup |
+| `usr/local/bin/slim-dashboards` | Root-run dashboard backup and rollback helper for the provisioned dashboards |
 | `usr/local/bin/slim-backup*` | Private archive creation and restricted SSH download protocol |
 | `etc/unbound/` | Loopback DNSSEC-validating resolver, Pi-hole's only upstream |
 | `etc/rsyslog.d/`, `etc/logrotate.d/`, `usr/local/bin/asus-syslog-metrics` | ASUS syslog reception, daily rotation (up to 30 kept within a fixed 256 MiB filesystem) and deterministic metrics |
@@ -74,7 +75,7 @@ are supplied. Set and store web-administration credentials privately.
    on the resulting configuration. Keep all five monitoring endpoints on loopback:
    Prometheus 9090, node 9100, blackbox 9115, Pi-hole 9617 and router 9618. The blackbox
    unit drop-in grants only the capability required for its ICMP probe binary.
-6. Install Grafana provisioning and the two custom dashboards. Merge the server
+6. Install Grafana provisioning and the three custom dashboards. Merge the server
    excerpt, set a private admin password and restrict port 3000 to your trusted LAN.
    Pi-hole administration/DNS, SSH and optional xrdp need their own reviewed LAN rules.
    Do not expose metrics or administrative pages through WAN port forwarding.
