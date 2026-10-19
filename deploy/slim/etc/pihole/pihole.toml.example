@@ -1,4 +1,0 @@
-[dns]
-upstreams = ["127.0.0.1#5335"]   # Unbound on loopback (was 1.1.1.1 + 9.9.9.9 until 2026-10-18)
-interface = "enp1s0"
-listeningMode = "LOCAL"

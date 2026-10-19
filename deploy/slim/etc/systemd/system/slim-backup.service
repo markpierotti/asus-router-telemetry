@@ -1,8 +1,0 @@
-[Unit]
-Description=Nightly config backup of slim
-After=pihole-FTL.service grafana-server.service
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/slim-backup
-Nice=10
-IOSchedulingClass=idle

@@ -19,10 +19,10 @@ minimal synthetic reproduction. No response-time guarantee is offered.
 The single-shot C reporter reads Linux telemetry and emits JSON. The external
 Python collector uses OpenSSH to upload and execute a temporary reporter, validate
 its response and retain local samples, outcomes and collection-incident state.
-The `deploy/slim` examples add unattended systemd operation, loopback HTTP metrics
-listeners, monitoring provisioning and private backup scripts. They require trusted
-operator configuration; they are not an automatic installer. No router firmware
-modification is included.
+The collector systemd example is in `collector/examples`. Broader Slim deployment
+examples are maintained in [home-lab](https://github.com/markpierotti/home-lab),
+which consumes a pinned collector revision and owns its deployment security policy.
+No router firmware modification is included.
 
 Relevant assets are operator credentials, trusted host keys, executable identity,
 the collector host's files and terminal, device files, and retained evidence.

@@ -41,7 +41,7 @@ class LoopExitTests(unittest.TestCase):
 
     def test_example_unit_blocks_only_hard_stop_and_bad_configuration(self):
         root = Path(__file__).resolve().parents[2]
-        unit = (root / 'deploy/slim/etc/systemd/system/rtax-collector.service').read_text()
+        unit = (root / 'collector/examples/rtax-collector.service').read_text()
         line = next(line for line in unit.splitlines() if line.startswith('RestartPreventExitStatus='))
         blocked = {int(value) for value in line.split('=', 1)[1].split()}
         self.assertEqual(blocked, {cli.EXIT_HARD_STOP, cli.EXIT_BAD_OPTION})
@@ -52,5 +52,5 @@ class LoopExitTests(unittest.TestCase):
         # The orderly stop removes the router work dir THROUGH the ssh control master,
         # so systemd must not signal the master at the same time (KillMode=control-group).
         root = Path(__file__).resolve().parents[2]
-        unit = (root / 'deploy/slim/etc/systemd/system/rtax-collector.service').read_text()
+        unit = (root / 'collector/examples/rtax-collector.service').read_text()
         self.assertIn('KillMode=mixed', unit.splitlines())
