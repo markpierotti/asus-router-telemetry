@@ -30,6 +30,12 @@ class RollbackTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         os.chmod(self.tmp, 0o755)
+        # Hosted checkout parents can be private to the runner user. Stage the
+        # exact production bytes in our searchable fixture so nobody reaches the
+        # script's UID gate, rather than failing to open the checkout itself.
+        self.script = self.tmp / 'slim-dashboards'
+        shutil.copy2(SCRIPT, self.script)
+        self.script.chmod(0o755)
         self.live = self.tmp / 'live'
         self.backup = self.tmp / 'backup'
         self.live.mkdir()
@@ -65,7 +71,7 @@ class RollbackTests(unittest.TestCase):
         env = {'PATH': os.environ['PATH'], 'SLIM_DASHBOARD_DIR': str(self.live),
                'SLIM_BACKUP_ROOT': str(self.tmp), 'SLIM_SUDO': str(sudo or self.fake_sudo)}
         kwargs = {'preexec_fn': drop_privileges} if (unprivileged and IS_ROOT) else {}
-        return subprocess.run(['sh', str(SCRIPT), *map(str, args)], env=env,
+        return subprocess.run(['sh', str(self.script), *map(str, args)], env=env,
                               capture_output=True, text=True, **kwargs)
 
     def live_text(self, name):
