@@ -40,7 +40,8 @@ def create(image, size):
         os.close(fd)
     regular_image(image, size)
     # Discard would punch holes in the reservation while formatting the image.
-    subprocess.run(['/usr/sbin/mkfs.ext4', '-q', '-E', 'nodiscard', '-m', '0',
+    subprocess.run(['/usr/sbin/mkfs.ext4', '-q', '-E',
+                    'nodiscard,lazy_itable_init=0,lazy_journal_init=0', '-m', '0',
                     '-F', str(image)], check=True)
     regular_image(image, size)
     print('created fixed log image; mount and migrate logs separately')

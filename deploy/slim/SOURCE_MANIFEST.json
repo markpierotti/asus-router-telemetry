@@ -72,7 +72,7 @@
     "hermes/scripts/slim-snapshot.py": "fc5e77fa6deb88f3e6915ecd4ffd62abac10af96285b6d1a3b1d38737b52e400",
     "macos/local.homelab.pull-slim-backups.plist.example": "b5372683c3f54d60f4c4d57ef90dc5bb87099bc7d5680be44b7f4406b5132d15",
     "macos/pull-slim-backups": "99e3ad75cd6eb051b610223b37bd429455aa4911667f240caa7c3d84b401752d",
-    "tests/syslog_storage_linux.py": "dde8bacb5250adfc2dcfd1ce3f40d784a12c24f44a81793d11359603f57add14",
+    "tests/syslog_storage_linux.py": "38a89da9e7aa22e3b6b425773338a8229bb130e5b45fbd71944bc414069fba3f",
     "tests/test_asus_syslog_metrics.py": "4629e6fb9f9deb53a785765a37048be4d6294058c521c17e679e840609422fe2",
     "tests/test_backup_pull.py": "fcfdb58f9d46fe4a8fcc3f88999a9d5f1e427f9e005e47d4caa610eaa7abd87b",
     "tests/test_exporters.py": "b6e3d9bd6f51ee24d648e4c0ba330498b598291b2ad4828b2ee89d71e8a24eb3",
@@ -88,7 +88,7 @@
     "usr/local/bin/slim-backup": "63fbf3e02ed7dba02e0ccf140ef2be2589cb0e747052937d58be8b012a9949e9",
     "usr/local/bin/slim-backup-serve": "bc9f0d6fa5c7a45542b96c484aab5bf2798a5e78930c1a27c03b6a42e591938b",
     "usr/local/bin/slim-heartbeat": "b417bbdcf7f4f18d6753c53764634c5d3e76995ea72437c1f53d1f7824f0c3a6",
-    "usr/local/bin/slim-syslog-storage": "fb8fd81037275d7e938141467b4e9aabd7499b86476b158103c7c8571c5819b8",
+    "usr/local/bin/slim-syslog-storage": "c2ae498d6f1a52a4e989db68db0ec1c0cf16568b713bd6a13eac910a97be0b24",
     "var/lib/grafana/dashboards/pihole.json": "617f09847cecde24e1950b49212102faa37a364e6b67650b6ae6de1c0683a552",
     "var/lib/grafana/dashboards/router.json": "f80410bc87084b6dace4be451dacec838dd78f33c8824f4e6ad5b33b5ab13817"
   }

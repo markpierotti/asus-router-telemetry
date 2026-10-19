@@ -115,10 +115,14 @@ rsyslog errors are rate limited and stderr has a per-process cap; see the
 [rsyslog global options](https://docs.rsyslog.com/doc/rainerscript/global.html).
 
 Migration needs a short syslog outage. Take a root-only configuration/state backup
-first. Stop rsyslog, the syslog metrics timer/service and Hermes gateway while
+first. Stop rsyslog **and its activating syslog.socket**, the syslog metrics
+timer/service and Hermes gateway while
 copying so neither incremental reader advances its offset during migration.
 Create the image with `sudo slim-syslog-storage create`: it refuses existing,
 sparse, wrong-sized or insecure images and requires a 1 GiB free-space reserve.
+Formatting disables discard and lazy metadata initialization to preserve that
+reservation. Do not run fstrim against this loop filesystem: discarding free image
+blocks removes the reservation and the next guard check will refuse it.
 Never automatically recreate a missing or damaged image during service startup.
 
 Move the old `/var/log/asus` directory to a timestamped root-only backup location.

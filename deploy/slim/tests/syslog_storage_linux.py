@@ -51,6 +51,10 @@ def main():
         run('mount', '-o', 'loop,nodev,nosuid,noexec', image, mount)
         check = [sys.executable, HELPER, 'check', '--image', image, '--mountpoint', mount, '--size-mib', '32']
         run(*check)
+        # Lazy inode initialization can deallocate an image after mount. Creation
+        # must initialize metadata eagerly so the reserved budget stays intact.
+        time.sleep(6)
+        run(*check)
         cfg = (ROOT / 'etc/rsyslog.d/10-asus-remote.conf').read_text()
         cfg = cfg.replace('192.0.2.20', '127.0.0.1').replace('192.0.2.10', '127.0.0.1')
         cfg = cfg.replace('port="514"', 'port="15514"').replace('/var/log/asus', str(mount))
