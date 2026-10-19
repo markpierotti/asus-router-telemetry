@@ -41,7 +41,11 @@ shift
 
 case "$cmd" in
 backup)
-    [ -d "$LIVE" ] || die "dashboard directory $LIVE not found"
+    [ -d "$LIVE" ] && [ ! -L "$LIVE" ] || die "dashboard directory must be a real directory"
+    # Snapshots contain ordinary files/directories only; cp -a must never retain
+    # links or device/FIFO entries that acquire a different meaning on restore.
+    unsafe=$(find "$LIVE" ! -type d ! -type f -print -quit)
+    [ -z "$unsafe" ] || die "backup refuses non-regular entry: $unsafe"
     for n in $REQUIRED; do [ -f "$LIVE/$n.json" ] || die "$LIVE/$n.json missing; refusing to make an incomplete backup"; done
     dest=$(mktemp -d "$BACKUP_ROOT/grafana-dashboards-$(date +%Y%m%d-%H%M%S).XXXXXX")
     # Copy entries one by one: `cp -a dir/. dest/` would also copy the live
@@ -66,11 +70,11 @@ rollback)
     backup=${1:-}; [ -n "$backup" ] || die "rollback needs BACKUP_DIR"
     shift
     [ "$#" -gt 0 ] || die "rollback needs at least one dashboard name"
-    [ -d "$backup" ] || die "backup $backup is missing or not a directory; nothing changed"
+    [ -d "$backup" ] && [ ! -L "$backup" ] || die "backup $backup is missing or not a directory; nothing changed"
     [ -r "$backup" ] && [ -x "$backup" ] || die "backup $backup is not readable; nothing changed"
-    [ -d "$LIVE" ] || die "dashboard directory $LIVE not found"
+    [ -d "$LIVE" ] && [ ! -L "$LIVE" ] || die "dashboard directory must be a real directory"
     for n in $REQUIRED; do
-        [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "backup $backup is not a valid backup ($n.json missing or unreadable); nothing changed"
+        [ ! -L "$backup/$n.json" ] && [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "backup $backup is not a valid backup ($n.json missing or unreadable); nothing changed"
     done
     # Preflight every name before changing anything.
     for n in "$@"; do
@@ -78,7 +82,7 @@ rollback)
         if [ ! -e "$backup/$n.json" ] && [ ! -L "$backup/$n.json" ]; then
             required "$n" && die "$n.json should be in the backup but is not; nothing changed"
         else
-            [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "$backup/$n.json is not a readable file; nothing changed"
+            [ ! -L "$backup/$n.json" ] && [ -f "$backup/$n.json" ] && [ -r "$backup/$n.json" ] || die "$backup/$n.json is not a readable file; nothing changed"
         fi
     done
     # Copy every restore before changing any live file. Staged files do not end
@@ -91,27 +95,44 @@ rollback)
             cp -a "$backup/$n.json" "$staging/$n.new"
         fi
     done
-    python3 - "$LIVE" "$staging" "$@" <<'PY'
+    python3 - "$LIVE" "$staging" "$backup" "$@" <<'PY'
 import os
 from pathlib import Path
 import stat
 import sys
 
-live, staging = map(Path, sys.argv[1:3])
-names = list(dict.fromkeys(sys.argv[3:]))
-# Finish metadata and flush ALL staged files before the first publication.
+live, staging, backup = map(Path, sys.argv[1:4])
+names = list(dict.fromkeys(sys.argv[4:]))
+# The restore/delete decision comes from the validated backup, never from a
+# possibly missing or dangling staging entry. Validate every stage before publish.
+restores = {}
 for name in names:
-    staged = staging / (name + '.new')
-    if not staged.exists():
+    source = backup / (name + '.json')
+    try:
+        source_mode = source.lstat().st_mode
+    except FileNotFoundError:
+        if name != 'slim-overview':
+            raise ValueError('required backup disappeared: ' + name)
+        restores[name] = False
         continue
-    target = live / (name + '.json')
-    reference = target if target.is_file() else live / 'pihole.json'
-    if reference.is_file():
-        metadata = reference.stat()
-        os.chown(staged, metadata.st_uid, metadata.st_gid)
-        os.chmod(staged, stat.S_IMODE(metadata.st_mode))
-    with staged.open('rb') as stream:
-        os.fsync(stream.fileno())
+    if not stat.S_ISREG(source_mode):
+        raise ValueError('backup is not a regular file: ' + name)
+    restores[name] = True
+    staged = staging / (name + '.new')
+    fd = os.open(staged, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError('stage is not a regular file: ' + name)
+        target = live / (name + '.json')
+        reference = target if target.exists() or target.is_symlink() else live / 'pihole.json'
+        metadata = reference.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError('live reference is not a regular file: ' + name)
+        os.fchown(fd, metadata.st_uid, metadata.st_gid)
+        os.fchmod(fd, stat.S_IMODE(metadata.st_mode))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 directory = os.open(live, os.O_RDONLY | os.O_DIRECTORY)
 try:
     # Each file changes atomically. This is not a transaction across dashboards:
@@ -119,7 +140,7 @@ try:
     for name in names:
         staged = staging / (name + '.new')
         target = live / (name + '.json')
-        if staged.exists():
+        if restores[name]:
             os.replace(staged, target)
             print('restored ' + name + '.json')
         else:

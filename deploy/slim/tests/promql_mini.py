@@ -11,6 +11,7 @@ Semantics follow Prometheus: a comparison between a vector and a scalar filters 
 vector; `A and on() B` keeps A only if B is non-empty; `A or B` keeps every sample of
 A plus the samples of B whose label set is not in A.
 """
+import json
 import re
 
 TOKEN = re.compile(r'''\s*(?:
@@ -36,7 +37,10 @@ def tokenize(text):
 
 
 class Series(dict):
-    """Mapping of frozenset(label items) -> float, i.e. an instant vector."""
+    """Instant vector, retaining selector labels for absent() inference only."""
+    def __init__(self, *args, absent_labels=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.absent_labels = frozenset(absent_labels)
 
 
 def vec(pairs):
@@ -136,7 +140,7 @@ class Evaluator:
             self.take('(')
             arg = self.need_vec(self.parse_or())
             self.take(')')
-            return Series() if arg else Series({frozenset(): 1.0})
+            return Series() if arg else Series({arg.absent_labels: 1.0})
         if value in KEYWORDS:
             raise ValueError(f'unexpected keyword {value!r}')
         return self.selector(value)
@@ -148,13 +152,22 @@ class Evaluator:
             self.take('{')
             while self.peek()[1] != '}':
                 label = self.take()[1]
+                if label == "__name__":
+                    raise ValueError("metric name cannot be set twice in a named selector")
                 op = self.take()[1]
                 raw = self.take()[1]
-                matchers.append((label, op, raw[1:-1]))
+                matchers.append((label, op, json.loads(raw)))
                 if self.peek()[1] == ',':
                     self.take()
             self.take('}')
-        out = Series()
+        inferred, seen = {}, set()
+        for label, op, value in matchers:
+            if label in seen:
+                inferred.pop(label, None)
+            elif label != '__name__' and op == '=':
+                inferred[label] = value
+            seen.add(label)
+        out = Series(absent_labels=inferred.items())
         for labels, value in self.samples.get(name, []):
             if all(self.match(labels.get(l, ''), op, v) for l, op, v in matchers):
                 # Prometheus drops the metric name from results only after operators;

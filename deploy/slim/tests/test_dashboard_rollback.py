@@ -253,5 +253,60 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(self.live_text('pihole'), 'pihole-OLD')
 
 
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_backup_refuses_symlinks_and_special_entries(self):
+        target = self.live / 'router.json'
+        target.unlink()
+        target.symlink_to('pihole.json')
+        result = self.run_script('backup')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(list(self.tmp.glob('grafana-dashboards-*')), [])
+        target.unlink()
+        os.mkfifo(target)
+        result = self.run_script('backup')
+        self.assertNotEqual(result.returncode, 0)
+
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_rollback_rejects_relative_absolute_and_dangling_backup_links(self):
+        sentinel = self.tmp / 'sentinel'
+        self.write(sentinel, 'outside')
+        before = sentinel.stat()
+        for name in ('router', 'pihole', 'slim-overview'):
+            path = self.backup / (name + '.json')
+            original = path.read_bytes() if path.exists() else None
+            for destination in ('../sentinel', str(sentinel), 'missing'):
+                with self.subTest(name=name, destination=destination):
+                    path.unlink(missing_ok=True)
+                    path.symlink_to(destination)
+                    result = self.run_script('rollback', self.backup, 'slim-overview', 'pihole', 'router')
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assert_live_untouched()
+                    self.assertEqual(sentinel.read_text(), 'outside')
+                    after = sentinel.stat()
+                    self.assertEqual((after.st_uid, after.st_gid, after.st_mode),
+                                     (before.st_uid, before.st_gid, before.st_mode))
+            path.unlink()
+            if original is not None:
+                path.write_bytes(original)
+
+    @unittest.skipUnless(IS_ROOT, 'needs real root')
+    def test_missing_or_symlink_stage_aborts_instead_of_deleting(self):
+        # Fault the copy command after successful preflight. A missing stage must
+        # never be interpreted as an intentionally absent backup dashboard.
+        for action in ('exit 0', 'ln -s "' + str(self.tmp / 'sentinel') + '" "$3"; exit 0'):
+            self.write(self.tmp / 'sentinel', 'outside')
+            bindir = self.tmp / 'fault-bin'
+            bindir.mkdir(exist_ok=True)
+            real_cp = shutil.which('cp')
+            (bindir / 'cp').write_text('#!/bin/sh\ncase "$2" in */backup/router.json) ' + action + ';; esac\nexec "' + real_cp + '" "$@"\n')
+            (bindir / 'cp').chmod(0o755)
+            from unittest.mock import patch
+            with patch.dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH']):
+                result = self.run_script('rollback', self.backup, 'pihole', 'router', 'slim-overview')
+            self.assertNotEqual(result.returncode, 0)
+            self.assert_live_untouched()
+            self.assertEqual((self.tmp / 'sentinel').read_text(), 'outside')
+
+
 if __name__ == '__main__':
     unittest.main()

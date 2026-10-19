@@ -55,7 +55,9 @@ Backups are root-owned and mode 0750, so an ordinary operator cannot even test
 whether a file exists in one: an unprivileged `[ -e ... ]` answers "absent" for a file
 that is there. Backup and rollback therefore go through
 `deploy/slim/usr/local/bin/slim-dashboards`, which escalates with `sudo` first and does
-every check and copy as root. Never test the backup directory yourself without `sudo`.
+every check and copy as root. Backups must contain regular dashboard files;
+symlinks and special entries are rejected. Restore/delete decisions use the backup,
+never a missing staging file. Never test the backup directory yourself without `sudo`.
 
 ```sh
 D=deploy/slim/var/lib/grafana/dashboards
@@ -246,7 +248,16 @@ Remote ASUS logs must live on the separate 256 MiB ext4 image mounted at
 it cannot enforce a disk budget between runs. The preallocated image includes
 current logs, rotated logs and filesystem metadata in one budget. When it fills,
 UDP logs can be lost until space is freed, while the remaining root disk stays
-available. The original allowlist and file permissions still apply. Internal
+available. This is containment, not automatic recovery: the current 30-file,
+50 MiB rotation policy does not fit its worst-case retained volume inside this
+image. Compression can also need space that is unavailable after exhaustion.
+Do not rely on daily rotation to recover a full filesystem. The 80% alert requires
+operator action: identify and stop the noisy source, preserve needed evidence to
+a separate private destination, then remove expendable rotated logs and verify
+new messages arrive. If only the current file consumes the budget, coordinate
+rotation and reader-state handling before discarding data; do not reset offsets
+or silently truncate forensic evidence. Automatic evidence eviction is not part
+of this deployment's contract. The original allowlist and file permissions still apply. Internal
 rsyslog errors are rate limited and stderr has a per-process cap; see the
 [rsyslog global options](https://docs.rsyslog.com/doc/rainerscript/global.html).
 
