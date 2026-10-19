@@ -74,7 +74,13 @@ visibility remain unvalidated. Exporters read trusted local files and databases.
 Pi-hole metrics include DNS domains and client identities. Backup archives may
 contain secrets and household history and must stay private. A best-effort config
 archive and a backup-success metric do not establish completeness or recoverability.
-External Telegram delivery and an independent host-outage check remain pending. SSH master
+Telegram alert delivery and an external heartbeat (healthchecks.io) are live; the
+heartbeat covers Slim being down or offline. During a household internet outage
+healthchecks.io still notices the missing pings and notifies externally, but missing
+pings cannot distinguish a failed host from a failed WAN, and the notice reaches a
+recipient only once that recipient has connectivity. The Hermes agent
+is read-only and sandboxed; treat its Telegram replies as advice, not verified
+actions (see docs/slim-hermes-20261018.md). SSH master
 liveness checks describe a control socket, not independent process identity or
 router reachability. The pending-cleanup ledger records historical uncertainty;
 manual reconciliation does not erase it. Storage candidates are heuristics and

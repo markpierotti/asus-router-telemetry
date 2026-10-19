@@ -28,14 +28,21 @@ dpkg --get-selections > "$work/dpkg-selections.txt"
   grafana-server -v 2>/dev/null || true; prometheus --version 2>&1 | head -1; } > "$work/versions.txt"
 
 tar -C / --ignore-failed-read -czf "$work/files.tar.gz" \
-  etc/grafana var/lib/grafana/dashboards \
+  etc/grafana var/lib/grafana/dashboards etc/slim-secrets \
+  etc/systemd/system/grafana-server.service.d \
+  etc/systemd/system/slim-heartbeat.service etc/systemd/system/slim-heartbeat.timer \
   etc/prometheus etc/default/prometheus etc/default/prometheus-node-exporter \
   etc/default/prometheus-blackbox-exporter \
   etc/systemd/system/pihole-exporter.service \
   etc/systemd/system/prometheus-blackbox-exporter.service.d \
   etc/systemd/system/slim-backup.service etc/systemd/system/slim-backup.timer \
   etc/systemd/system/rtax-collector.service etc/systemd/system/rtax-exporter.service \
-  usr/local/bin etc/pihole-exporter etc/ufw \
+  usr/local/bin etc/pihole-exporter etc/ufw etc/unbound etc/rsyslog.d etc/logrotate.d/asus-remote \
+  home/hermes/.hermes/config.yaml home/hermes/.hermes/SOUL.md home/hermes/.hermes/scripts \
+  home/hermes/.hermes/cron/jobs.json home/hermes/network \
+  etc/systemd/system/hermes-gateway.service etc/systemd/system/hermes-gateway.service.d \
+  etc/systemd/system/asus-syslog-metrics.service etc/systemd/system/asus-syslog-metrics.timer \
+  etc/systemd/system/var-log-asus.mount etc/systemd/system/rsyslog.service.d \
   etc/apt/sources.list etc/apt/sources.list.d etc/apt/keyrings \
   etc/lightdm/lightdm.conf.d etc/xdg/autostart/rotate-screen.desktop \
   etc/sudoers.d/slim etc/ssh/sshd_config.d etc/default/grub etc/netplan \

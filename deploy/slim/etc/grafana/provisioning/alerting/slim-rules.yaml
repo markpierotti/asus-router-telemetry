@@ -59,6 +59,57 @@
      "isPaused": false
     },
     {
+     "uid": "unbound-down",
+     "title": "Unbound resolver not answering",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "probe_success{job=\"dns_unbound\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            1
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "2m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "Unbound, Pi-hole's only upstream, isn't answering on slim: new lookups will fail. Quick fix: sudo pihole-FTL --config dns.upstreams '[\"1.1.1.1\",\"9.9.9.9\"]'"
+     },
+     "labels": {
+      "severity": "critical"
+     },
+     "isPaused": false
+    },
+    {
      "uid": "gateway-down",
      "title": "Main gateway unreachable",
      "condition": "B",
@@ -569,6 +620,57 @@
      "isPaused": false
     },
     {
+     "uid": "asus-syslog-silent",
+     "title": "ASUS syslog silent",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "(time() - asus_syslog_last_line_timestamp_seconds) / 60",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            60
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "5m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "No syslog from the ASUS for over an hour. Slim's SSH probe normally makes it log every minute, so syslog delivery is broken (check the ASUS Remote Log Server setting and: sudo systemctl status rsyslog asus-syslog-metrics.timer)."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
      "uid": "router-memory-low",
      "title": "ASUS router memory low",
      "condition": "B",
@@ -664,6 +766,57 @@
      "execErrState": "Error",
      "annotations": {
       "summary": "Prometheus can't scrape {{ $labels.job }} ({{ $labels.instance }}): an exporter on slim has stopped."
+     },
+     "labels": {
+      "severity": "warning"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "asus-log-storage-filling",
+     "title": "ASUS log storage over 80%",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prometheus",
+       "model": {
+        "refId": "A",
+        "expr": "100 * (1 - node_filesystem_avail_bytes{instance=\"slim\",mountpoint=\"/var/log/asus\"} / node_filesystem_size_bytes{instance=\"slim\",mountpoint=\"/var/log/asus\"})",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            80
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "for": "2m",
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "annotations": {
+      "summary": "ASUS log filesystem is over 80% full or missing. Check the mount and rsyslog; preserve evidence, then free old rotated logs on this filesystem. Full storage drops new UDP logs but cannot consume the remaining root disk."
      },
      "labels": {
       "severity": "warning"

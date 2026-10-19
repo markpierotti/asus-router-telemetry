@@ -1,5 +1,29 @@
 # Slim dashboards: overview and restyle, 19 October 2026
 
+## Deployment acceptance — 19 October 2026
+
+The dashboards were deployed from `9491997` to Slim and visually checked in
+authenticated Grafana 13.2.4 at desktop width and a 400-pixel viewport. The earlier
+source-only deployment limitations below describe the original implementation
+session and are superseded by this acceptance record.
+
+- All 45 dashboard/deployment tests passed as root on Slim, with no skips.
+- All 54 dashboard targets ran against live Prometheus and returned series without
+  query errors: 21 overview, 15 Pi-hole and 18 Router targets. These counts reflect
+  the deployed JSON, rather than the earlier session's reported totals.
+- Overview, Pi-hole and Router panels rendered; navigation, legends and the narrow
+  layout were inspected. The screenshots contain private Pi-hole details and are
+  retained privately.
+- Existing community dashboards and alerting, Prometheus and notification
+  configuration were unchanged by dashboard deployment. The later syslog storage
+  security fix is a separate PR #5 change.
+- The ASUS ping target was substituted only in the live Router JSON. The public
+  source keeps its documentation address.
+- A root-owned, mode-0750 timestamped backup and the root-run `slim-dashboards`
+  helper provide rollback. Dashboard changes are already live; merging records
+  their reviewed source.
+
+
 Branch `add-slim-overview-dashboard`. Adds the **Slim overview** dashboard and
 restyles the existing Pi-hole and Router dashboards. Dashboard UIDs, titles, panel
 ids and layout are unchanged. No alert rule, notification route, collector, DNS or

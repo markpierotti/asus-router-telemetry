@@ -1,7 +1,7 @@
 # Foreground telemetry collector
 
 Python standard-library collector adapted from the RT-AX56U bench implementation.
-Current source: **1.6.2 (unreleased)**; Slim runs **1.6.0**. Historical hardware
+Current source: **1.6.2 (unreleased)**; Slim runs **1.6.2** (deployed 18 October 2026). Historical hardware
 acceptance belongs to the 1.5.5 private bench adaptation; see
 [Validation boundary](#validation-boundary).
 

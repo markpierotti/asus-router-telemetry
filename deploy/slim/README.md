@@ -35,11 +35,15 @@ are supplied. Set and store web-administration credentials privately.
 | `usr/local/bin/pihole-exporter` | Read-only Pi-hole SQLite metrics, loopback port 9617 |
 | `usr/local/bin/rtax-exporter` | Read-only collector state and history metrics, loopback port 9618 |
 | `etc/prometheus/` and `etc/default/` | Scrapes, probes and loopback listeners; 30-day / 2 GB retention |
-| `etc/grafana/provisioning/` | Datasource, dashboard provider and 13 alert rules |
+| `etc/grafana/provisioning/` | Datasource, dashboard provider, Telegram/Hermes notifications and 16 alert rules |
 | `var/lib/grafana/dashboards/` | Custom Slim overview, Pi-hole and ASUS dashboards (deploy and rollback: [operations runbook](../../docs/slim-operations.md)) |
 | `etc/systemd/system/` | Collector/exporter units, backup timer and ICMP capability setup |
 | `usr/local/bin/slim-dashboards` | Root-run dashboard backup and rollback helper for the provisioned dashboards |
 | `usr/local/bin/slim-backup*` | Private archive creation and restricted SSH download protocol |
+| `etc/unbound/` | Loopback DNSSEC-validating resolver, Pi-hole's only upstream |
+| `etc/rsyslog.d/`, `etc/logrotate.d/`, `usr/local/bin/asus-syslog-metrics` | ASUS syslog reception, daily rotation (up to 30 kept within a fixed 256 MiB filesystem) and deterministic metrics |
+| `usr/local/bin/slim-syslog-storage`, `etc/systemd/system/var-log-asus.mount`, `etc/systemd/system/rsyslog.service.d/` | Persistent log budget and fail-closed startup/mount-loss handling; migrate existing logs before enabling |
+| `hermes/` | Read-only Hermes operator: role, config overlay, helper scripts; hardened by `etc/systemd/system/hermes-gateway.service.d/` |
 | `macos/` | Daily backup pull and launchd example |
 | `etc/pihole/` and `etc/grafana/*.example` | Minimal configuration excerpts to merge manually |
 
@@ -101,6 +105,7 @@ are supplied. Set and store web-administration credentials privately.
 | Rule | Trigger | Pending period |
 | --- | --- | --- |
 | Pi-hole DNS | DNS probe fails | 2 minutes |
+| Unbound | Loopback resolver probe fails | 2 minutes |
 | Gateway / ASUS | Respective ping probe fails | 3 minutes |
 | Internet | All configured internet probe series report failure | 5 minutes |
 | Host disk | Root disk above 85% | 10 minutes |
@@ -110,6 +115,7 @@ are supplied. Set and store web-administration credentials privately.
 | Collector stale | Last attempt over 5 minutes old | 2 minutes |
 | Collection incident | Collector incident state open | Immediate |
 | Router reboot | Boot-time identity changes in a 15-minute window | Immediate |
+| ASUS syslog silent | No AP syslog line for over an hour | 5 minutes |
 | Router memory | Available memory below 10% | 15 minutes |
 | Scrape target | Target `up` is zero | 5 minutes |
 
@@ -138,4 +144,6 @@ pinned directories; moving it into either would include it in backups. See [oper
 
 The screen-rotation helper is optional and specific to an inverted local monitor.
 It skips headless and xrdp sessions. This tree does not configure network renderers,
-household DNS cutover, BIOS recovery, remote desktop or Telegram credentials.
+household DNS cutover, BIOS recovery or remote desktop. Telegram provisioning
+uses secret-file values supplied by the operator; no credentials are published.
+See [the Telegram and heartbeat milestone](../../docs/slim-alerts-20261018.md).
