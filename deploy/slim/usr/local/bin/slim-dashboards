@@ -50,7 +50,12 @@ backup)
     # in the shell so failure of ANY entry (including the overview) aborts.
     for entry in "$LIVE"/* "$LIVE"/.[!.]* "$LIVE"/..?*; do
         [ -e "$entry" ] || [ -L "$entry" ] || continue
-        cp -a "$entry" "$dest"/ || die "backup copy failed; incomplete directory: $dest"
+        if ! cp -a "$entry" "$dest"/; then
+            # Never leave a required-files-only partial copy that rollback could
+            # mistake for a complete backup with an intentionally absent overview.
+            rm -rf "$dest"
+            die "backup copy failed; incomplete backup removed"
+        fi
     done
     chown root:root "$dest"
     chmod 0750 "$dest"

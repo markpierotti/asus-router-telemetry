@@ -207,6 +207,7 @@ class RollbackTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, '')
         self.assertIn('backup copy failed', result.stderr)
+        self.assertEqual(list(self.tmp.glob('grafana-dashboards-*')), [])
 
 
 if __name__ == '__main__':
