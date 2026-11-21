@@ -26,6 +26,10 @@ See the home-lab [operations runbook](https://github.com/markpierotti/home-lab/b
 and [roadmap](https://github.com/markpierotti/home-lab/blob/main/docs/home-lab-roadmap.md).
 Historical deployment links in this repository redirect to that source.
 
+### November operational evidence
+
+I documented the collector's behaviour during Slim maintenance, including the firing and resolved alerts, recovery to zero consecutive collector failures, and the evidence I used to distinguish a monitoring-host interruption from a router restart. See my [infrastructure maintenance and recovery case study](https://github.com/markpierotti/home-lab/blob/main/docs/case-studies/infrastructure-maintenance-and-recovery.md). I also recorded independent heartbeat behaviour during an [AI-provider authentication failure](https://github.com/markpierotti/home-lab/blob/main/docs/case-studies/ai-provider-failure-and-recovery.md).
+
 ## Measured results
 
 Historical accepted bench pair: **collector 1.5.5 / reporter 1.0.5**, on stock
@@ -149,7 +153,7 @@ The earlier v0.1.0 release and its v1.5.5 bench acceptance remain unchanged.
 
 Telegram alert delivery (firing and resolved) and the external heartbeat were
 tested live on 18 October 2026. Controlled reboot/power-loss recovery, a backup
-restore rehearsal, a real internet or model-provider outage, USB NAS performance and
+restore rehearsal, a controlled internet or model-provider outage, USB NAS performance and
 whole-network visibility remain unvalidated. ASUS AP mode is in use; segmentation,
 Suricata and Project Limbo remain planned. The Hermes operator is read-only: there
 is no automatic remediation or SOC claim.
